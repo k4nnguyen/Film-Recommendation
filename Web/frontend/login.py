@@ -153,36 +153,29 @@ def main():
             btn_register = st.button("Đăng ký", use_container_width=True)
 
         # 2. XỬ LÝ LOGIC VÀ HIỂN THỊ THÔNG BÁO Ở NGOÀI CỘT (FULL WIDTH)
+        
         if btn_login:
             if username == "" or password == "":
                 st.warning("Vui lòng nhập tên đăng nhập và mật khẩu!")
             elif login_user(username, password):
+                # Lưu trạng thái đăng nhập
                 st.session_state['logged_in'] = True
                 st.session_state['username'] = username
-                st.rerun()
+                
+                
+                st.switch_page("app.py")
+                
             else:
                 st.error("Sai tên đăng nhập hoặc mật khẩu!")
 
         if btn_register:
+            # [Code phần đăng ký của bạn giữ nguyên không đổi...]
             if username == "" or password == "":
                 st.warning("Vui lòng điền thông tin để đăng ký!")
             elif add_user(username, password):
                 st.success("Đăng ký thành công! Bạn có thể bấm Đăng nhập.")
             else:
                 st.error("Tên đăng nhập đã tồn tại. Vui lòng chọn tên khác.")
-    else:
-        st.sidebar.success(f"Đang đăng nhập với: **{st.session_state['username']}**")
-        if st.sidebar.button("Đăng xuất"):
-            st.session_state['logged_in'] = False
-            st.session_state['username'] = ''
-            st.rerun()
-
-        st.header("Chào mừng bạn đến với Trang chính! ")
-        st.write("Giao diện sau khi đăng nhập vẫn giữ form chuẩn của Streamlit.")
-        
-        import pandas as pd
-        import numpy as np
-        st.line_chart(pd.DataFrame(np.random.randn(20, 3), columns=['A', 'B', 'C']))
 
 if __name__ == '__main__':
     main()

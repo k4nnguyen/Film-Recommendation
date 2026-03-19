@@ -2,111 +2,193 @@ import streamlit as st
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
-# --- 1. CẤU HÌNH & LOAD DỮ LIỆU ---
-st.set_page_config(page_title="Movie Recommender System", layout="wide")
+# --- 1. CẤU HÌNH & CSS ---
+st.set_page_config(page_title="Movie Recommender System", layout="wide", page_icon=None)
 
+style_css = """
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    
+    [data-testid="stImage"] img {
+        height: 350px !important;
+        object-fit: cover !important;
+        border-radius: 10px;
+        width: 100% !important;
+    }
+
+    .movie-title {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        height: 45px;
+        font-weight: bold;
+        margin-top: 10px;
+        line-height: 1.3;
+    }
+
+    .movie-genre {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: #888;
+        font-size: 0.85rem;
+        margin-bottom: 10px;
+    }
+
+    div.stButton > button {
+        width: 100%;
+        border-radius: 20px;
+        border: 1px solid #ff4b4b;
+    }
+
+    .footer {
+        position: relative;
+        left: 0;
+        bottom: 0;
+        width: 100%;
+        background-color: transparent;
+        color: #888;
+        text-align: center;
+        padding: 30px 0;
+        margin-top: 50px;
+        border-top: 1px solid #333;
+    }
+    </style>
+"""
+st.markdown(style_css, unsafe_allow_html=True)
+
+# Giải pháp cuộn trang bằng mẹo onerror (Bỏ hoàn toàn components.html để tránh lỗi TypeError)
+def scroll_to_top():
+    # Sử dụng một thẻ ảnh lỗi giả để kích hoạt lệnh JavaScript cuộn trang ngay lập tức
+    js_scroll = """
+        <img src="x" onerror="
+            var mainSection = window.parent.document.querySelector('section.main');
+            if (mainSection) {
+                mainSection.scrollTo({ top: 0, behavior: 'auto' });
+            }
+            this.parentNode.removeChild(this);
+        " style="display:none;">
+    """
+    st.markdown(js_scroll, unsafe_allow_html=True)
+
+# --- 2. LOAD DỮ LIỆU ---
 @st.cache_data
 def load_data():
-    df = pd.read_csv('../../crawl_data/movies_metadata_encoded.csv')
-    # Trích xuất ma trận đặc trưng (từ cột index 5 trở đi là các genre binary)
-    genre_features = df.iloc[:, 5:]
-    # Tính toán ma trận tương đồng Cosine
-    sim_matrix = cosine_similarity(genre_features)
+    try:
+        # Ưu tiên file có poster
+        df = pd.read_csv('../../crawl_data/data/movies_with_posters.csv', encoding='utf-8-sig')
+    except:
+        df = pd.read_csv('../../crawl_data/data/movies_metadata_encoded.csv', encoding='utf-8-sig')
+    
+    features = df.select_dtypes(include=['number'])
+    sim_matrix = cosine_similarity(features)
     return df, sim_matrix
 
 df, sim_matrix = load_data()
 
-# Khởi tạo session_state để quản lý việc "đang xem phim nào"
-if 'selected_movie_index' not in st.session_state:
-    st.session_state.selected_movie_index = None
+# --- 3. QUẢN LÝ TRẠNG THÁI ---
+if 'page' not in st.session_state:
+    st.session_state.page = "Trang chủ"
+if 'selected_idx' not in st.session_state:
+    st.session_state.selected_idx = None
 
-# --- 2. HÀM HỖ TRỢ ---
-def get_recommendations(movie_idx, top_n=10):
-    # Lấy điểm tương đồng của phim này với tất cả phim khác
-    sim_scores = list(enumerate(sim_matrix[movie_idx]))
-    # Sắp xếp giảm dần theo điểm tương đồng
-    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
-    # Lấy top_n phim (bỏ qua chính nó ở vị trí index 0)
-    return sim_scores[1:top_n+1]
+def nav_to(page):
+    st.session_state.page = page
+    st.session_state.selected_idx = None
+    st.rerun()
 
-def display_movie_grid(movie_indices, columns=5):
-    """Hiển thị danh sách phim dưới dạng lưới"""
-    for i in range(0, len(movie_indices), columns):
-        cols = st.columns(columns)
-        for j in range(columns):
-            if i + j < len(movie_indices):
-                idx = movie_indices[i+j]
+# --- 4. THANH NAVBAR ---
+nav_c1, nav_c2, nav_c3, nav_c4 = st.columns([2, 1, 1, 3])
+with nav_c1:
+    st.markdown("### Hệ thống gợi ý phim")
+with nav_c2:
+    if st.button("Trang chủ"): nav_to("Trang chủ")
+with nav_c3:
+    if st.button("Danh sách"): nav_to("Danh sách")
+with nav_c4:
+    search = st.text_input("", placeholder="Tìm phim...", label_visibility="collapsed")
+
+st.divider()
+
+# --- 5. HÀM HIỂN THỊ LƯỚI PHIM ---
+def display_grid(indices, cols=5):
+    if not indices:
+        st.warning("Không tìm thấy phim nào phù hợp.")
+        return
+        
+    for i in range(0, len(indices), cols):
+        columns = st.columns(cols)
+        for j in range(cols):
+            if i + j < len(indices):
+                idx = indices[i+j]
                 movie = df.iloc[idx]
-                with cols[j]:
-                    # Sử dụng placeholder vì dữ liệu hiện tại chưa có link ảnh poster thực tế
-                    st.image("https://via.placeholder.com/300x450?text=No+Image", use_container_width=True)
-                    st.subheader(movie['title'])
-                    st.caption(f"📅 {movie['release_date']} | 🌍 {movie['country'] if pd.notna(movie['country']) else 'N/A'}")
-                    st.write(f"🎭 {movie['genre']}")
+                with columns[j]:
+                    p_url = movie['poster_url'] if 'poster_url' in movie and pd.notna(movie['poster_url']) else "https://via.placeholder.com/300x450"
+                    st.image(p_url)
+                    st.markdown(f'<div class="movie-title">{movie["title"]}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="movie-genre">{movie["genre"]}</div>', unsafe_allow_html=True)
                     
-                    # Nút bấm để "Xem chi tiết & Gợi ý"
-                    if st.button(f"Xem phim này", key=f"btn_{idx}"):
-                        st.session_state.selected_movie_index = idx
+                    if st.button("Chi tiết", key=f"btn_{idx}"):
+                        st.session_state.selected_idx = idx
+                        st.session_state.page = "Chi tiết"
                         st.rerun()
 
-# --- 3. GIAO DIỆN CHÍNH ---
+# --- 6. LOGIC ĐIỀU HƯỚNG TRANG ---
 
-# Nút quay lại trang chủ nếu đang ở trang gợi ý
-if st.session_state.selected_movie_index is not None:
-    if st.button("⬅️ Quay lại Trang chủ"):
-        st.session_state.selected_movie_index = None
-        st.rerun()
+if search:
+    res = df[df['title'].str.contains(search, case=False)].index.tolist()
+    st.title(f"Kết quả cho: {search}")
+    display_grid(res)
 
-# LOGIC HIỂN THỊ
-if st.session_state.selected_movie_index is None:
-    # --- TRANG CHỦ ---
-    st.title("🎬 Trang chủ: Phim Mới & Thịnh Hành")
-    st.write("Dưới đây là những bộ phim nổi bật nhất dựa trên nội dung bạn quan tâm.")
-    
-    # Hiển thị mặc định 15 phim đầu tiên (hoặc có thể lấy ngẫu nhiên)
-    all_indices = list(range(len(df)))
-    display_movie_grid(all_indices[:15])
+elif st.session_state.page == "Danh sách":
+    scroll_to_top()
+    st.title("Tất cả phim trong hệ thống")
+    display_grid(list(range(len(df))))
+
+elif st.session_state.page == "Chi tiết":
+    if st.session_state.selected_idx is not None:
+        # Gọi hàm cuộn lên đầu trang ngay khi render phần chi tiết
+        scroll_to_top()
+        
+        movie = df.iloc[st.session_state.selected_idx]
+        
+        if st.button("Quay lại"): 
+            nav_to("Trang chủ")
+        
+        c1, c2 = st.columns([1, 2])
+        with c1: 
+            st.image(movie['poster_url'])
+        with c2:
+            st.title(movie['title'])
+            st.write(f"**Thể loại:** {movie['genre']}")
+            st.write(f"**Quốc gia:** {movie['country'] if pd.notna(movie['country']) else 'N/A'}")
+            st.write(f"**Ngày chiếu:** {movie['release_date']}")
+            st.link_button("Xem trên Momo", movie['url'])
+        
+        st.divider()
+        st.subheader("Gợi ý tương tự dựa trên nội dung")
+        sim_scores = list(enumerate(sim_matrix[st.session_state.selected_idx]))
+        sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)[1:11]
+        display_grid([x[0] for x in sim_scores])
+    else:
+        nav_to("Trang chủ")
 
 else:
-    # --- TRANG CHI TIẾT & GỢI Ý ---
-    selected_idx = st.session_state.selected_movie_index
-    current_movie = df.iloc[selected_idx]
-    
-    st.title(f"🎥 Bạn đang xem: {current_movie['title']}")
-    
-    # Hiển thị thông tin chi tiết phim đang chọn
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        st.image("https://via.placeholder.com/400x600?text=Poster", use_container_width=True)
-    with col2:
-        st.header("Thông tin chi tiết")
-        st.write(f"**Thể loại:** {current_movie['genre']}")
-        st.write(f"**Ngày phát hành:** {current_movie['release_date']}")
-        st.write(f"**Quốc gia:** {current_movie['country']}")
-        if pd.notna(current_movie['url']):
-            st.link_button("Xem Review trên Momo", current_movie['url'])
-    
-    st.divider()
-    
-    # GỢI Ý PHIM TƯƠNG TỰ
-    st.subheader("✨ Vì bạn quan tâm đến phim này, có thể bạn sẽ thích:")
-    rec_results = get_recommendations(selected_idx)
-    rec_indices = [x[0] for x in rec_results]
-    
-    display_movie_grid(rec_indices)
+    st.title("Phim mới đề xuất")
+    display_grid(list(range(len(df)))[:15])
 
-# --- 4. CSS TÙY CHỈNH ---
-st.markdown("""
-    <style>
-    div.stButton > button {
-        width: 100%;
-        border-radius: 5px;
-        background-color: #ff4b4b;
-        color: white;
-    }
-    div.stButton > button:hover {
-        background-color: #ff3333;
-        border: 1px solid white;
-    }
-    </style>
-""", unsafe_allow_html=True)
+# --- 7. FOOTER ---
+st.markdown(
+    """
+    <div class="footer">
+        <p>Hệ thống gợi ý phim - Đồ án thực hành</p>
+        <p>Sinh viên thực hiện: Nguyễn Kim An - Nguyễn Tiến Đạt - Trần Đức Lâm - Học viện Công nghệ Bưu chính Viễn thông (PTIT)</p>
+        <p>© 2026 Movie Recommender System</p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)

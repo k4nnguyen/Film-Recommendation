@@ -1,0 +1,30 @@
+# ========================
+# Cơ sở dữ liệu 
+# ========================
+*.db
+users.db
+*.sqlite3
+
+# ========================
+# File rác và Cache của Python / Jupyter
+# ========================
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
+
+
+# ========================
+# File cấu hình và biến môi trường
+# ========================
+.vscode/
+.env
+.streamlit/secrets.toml
+
+# ========================
+# Dữ liệu nặng (Tùy chọn)
+# ========================
+# Nếu các file .csv hoặc .zip của bạn quá nặng (trên 50MB) 
+# và bạn không muốn đẩy lên Git, hãy xóa dấu # ở 2 dòng dưới:
+# *.csv
+# *.zip

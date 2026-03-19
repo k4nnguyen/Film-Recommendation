@@ -4,6 +4,16 @@ import bcrypt
 def load_css():
     st.markdown("""
         <style>
+        /* Ẩn hoàn toàn thanh Sidebar (slider) */
+        [data-testid="stSidebar"] {
+            display: none;
+        }
+        
+        /* Ẩn nút mở sidebar trên thiết bị di động */
+        [data-testid="stSidebarNav"] {
+            display: none;
+        }
+        
         /* 1. Thu hẹp form lại và tạo hiệu ứng thẻ (Card) nổi lên giữa màn hình */
         .block-container {
             max-width: 450px !important; /* Độ rộng của form đăng nhập */
@@ -163,7 +173,7 @@ def main():
                 st.session_state['username'] = username
                 
                 
-                st.switch_page("app.py")
+                st.switch_page("pages/app.py")
                 
             else:
                 st.error("Sai tên đăng nhập hoặc mật khẩu!")

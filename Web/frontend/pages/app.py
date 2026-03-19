@@ -2,6 +2,11 @@ import streamlit as st
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
+# KIỂM TRA ĐĂNG NHẬP
+if 'logged_in' not in st.session_state or not st.session_state['logged_in']:
+    st.warning("Vui lòng đăng nhập để sử dụng hệ thống!")
+    st.stop()
+
 # --- 1. CẤU HÌNH & CSS ---
 st.set_page_config(page_title="Movie Recommender System", layout="wide", page_icon=None)
 
@@ -45,6 +50,7 @@ style_css = """
         border: 1px solid #ff4b4b;
     }
 
+    /* CSS cho Footer */
     .footer {
         position: relative;
         left: 0;
@@ -61,9 +67,8 @@ style_css = """
 """
 st.markdown(style_css, unsafe_allow_html=True)
 
-# Giải pháp cuộn trang bằng mẹo onerror (Bỏ hoàn toàn components.html để tránh lỗi TypeError)
+# Giải pháp cuộn trang bằng mẹo onerror
 def scroll_to_top():
-    # Sử dụng một thẻ ảnh lỗi giả để kích hoạt lệnh JavaScript cuộn trang ngay lập tức
     js_scroll = """
         <img src="x" onerror="
             var mainSection = window.parent.document.querySelector('section.main');
@@ -75,11 +80,23 @@ def scroll_to_top():
     """
     st.markdown(js_scroll, unsafe_allow_html=True)
 
-# --- 2. LOAD DỮ LIỆU ---
+# --- 2. THANH SIDEBAR: PROFILE & ĐĂNG XUẤT ---
+with st.sidebar:
+    st.markdown("### Thông Tin Người Dùng")
+    username = st.session_state.get('username', 'User')
+    st.write(f"Chào ngày mới {username}!")
+    
+    st.markdown("---")
+    if st.button("Đăng xuất"):
+        st.session_state['logged_in'] = False
+        st.session_state['username'] = ''
+        st.switch_page("login.py")
+
+# --- 3. LOAD DỮ LIỆU ---
 @st.cache_data
 def load_data():
     try:
-        # Ưu tiên file có poster
+        # Giữ nguyên đường dẫn theo yêu cầu
         df = pd.read_csv('../../crawl_data/data/movies_with_posters.csv', encoding='utf-8-sig')
     except:
         df = pd.read_csv('../../crawl_data/data/movies_metadata_encoded.csv', encoding='utf-8-sig')
@@ -90,7 +107,7 @@ def load_data():
 
 df, sim_matrix = load_data()
 
-# --- 3. QUẢN LÝ TRẠNG THÁI ---
+# --- 4. QUẢN LÝ TRẠNG THÁI ---
 if 'page' not in st.session_state:
     st.session_state.page = "Trang chủ"
 if 'selected_idx' not in st.session_state:
@@ -101,7 +118,7 @@ def nav_to(page):
     st.session_state.selected_idx = None
     st.rerun()
 
-# --- 4. THANH NAVBAR ---
+# --- 5. THANH NAVBAR ---
 nav_c1, nav_c2, nav_c3, nav_c4 = st.columns([2, 1, 1, 3])
 with nav_c1:
     st.markdown("### Hệ thống gợi ý phim")
@@ -114,7 +131,7 @@ with nav_c4:
 
 st.divider()
 
-# --- 5. HÀM HIỂN THỊ LƯỚI PHIM ---
+# --- 6. HÀM HIỂN THỊ LƯỚI PHIM ---
 def display_grid(indices, cols=5):
     if not indices:
         st.warning("Không tìm thấy phim nào phù hợp.")
@@ -137,7 +154,7 @@ def display_grid(indices, cols=5):
                         st.session_state.page = "Chi tiết"
                         st.rerun()
 
-# --- 6. LOGIC ĐIỀU HƯỚNG TRANG ---
+# --- 7. LOGIC ĐIỀU HƯỚNG TRANG ---
 
 if search:
     res = df[df['title'].str.contains(search, case=False)].index.tolist()
@@ -151,9 +168,7 @@ elif st.session_state.page == "Danh sách":
 
 elif st.session_state.page == "Chi tiết":
     if st.session_state.selected_idx is not None:
-        # Gọi hàm cuộn lên đầu trang ngay khi render phần chi tiết
         scroll_to_top()
-        
         movie = df.iloc[st.session_state.selected_idx]
         
         if st.button("Quay lại"): 
@@ -181,7 +196,7 @@ else:
     st.title("Phim mới đề xuất")
     display_grid(list(range(len(df)))[:15])
 
-# --- 7. FOOTER ---
+# --- 8. FOOTER ---
 st.markdown(
     """
     <div class="footer">

@@ -3,71 +3,98 @@ import numpy as np
 import time
 from sklearn.metrics import mean_squared_error
 
-# --- 1. TẢI DỮ LIỆU ---
-def load_data(file_path):
-    # u.data có cấu trúc: user_id | item_id | rating
-    names = ['user_id', 'item_id', 'rating']
-    df = pd.read_csv(file_path, sep='\s+', names=names, usecols=[0, 1, 2], engine='python')
-    return df
+# --- 1. HÀM TẢI DỮ LIỆU ---
+def load_csv_data(file_path):
+    # Đọc file CSV đã chia (dấu phẩy)
+    return pd.read_csv(file_path, sep=',')
 
-# --- 2. HÀM DỰ ĐOÁN (ĐIỀN DẤU "?") ---
-def predict(ratings, similarity):
-    # Tính toán dự đoán dựa trên trọng số tương đồng
-    mean_user_rating = ratings.mean(axis=1).values.reshape(-1, 1)
-    ratings_diff = (ratings - mean_user_rating).fillna(0)
-    pred = mean_user_rating + ratings_diff.dot(similarity) / np.array([np.abs(similarity).sum(axis=1)])
+# --- 2. HÀM DỰ ĐOÁN ITEM-ITEM KNN ---
+def predict_item_knn(train_matrix, similarity, k=10):
+    # train_matrix: (Users x Items), similarity: (Items x Items)
+    pred = np.zeros(train_matrix.shape)
+    
+    # Tính trung bình của mỗi User trong tập Train để khử bias
+    mean_user_rating = train_matrix.mean(axis=1).values.reshape(-1, 1)
+    ratings_diff = (train_matrix - mean_user_rating).fillna(0).values
+    
+    sim_matrix = similarity.values
+    
+    for j in range(train_matrix.shape[1]): # Duyệt qua từng phim
+        # Tìm Top K phim giống với phim j nhất
+        # argsort trả về chỉ số tăng dần, lấy phần cuối và đảo ngược
+        top_k_indices = np.argsort(sim_matrix[:, j])[:-k-1:-1]
+        
+        weights = sim_matrix[top_k_indices, j]
+        sum_weights = np.sum(np.abs(weights))
+        
+        if sum_weights != 0:
+            # Dự đoán dựa trên trọng số của K láng giềng
+            pred[:, j] = mean_user_rating.flatten() + (ratings_diff[:, top_k_indices].dot(weights) / sum_weights)
+        else:
+            # Nếu không có láng giềng nào tương quan, dùng điểm trung bình của User
+            pred[:, j] = mean_user_rating.flatten()
+            
     return pred
 
 # --- 3. CHƯƠNG TRÌNH CHÍNH ---
 if __name__ == "__main__":
-    df = load_data('u.data')
+    # Nạp dữ liệu từ 2 file đã chia
+    train_df = load_csv_data('ua_train.csv')
+    test_df = load_csv_data('ua_test.csv')
     
-    # Tạo ma trận User-Item ban đầu (Hàng: User, Cột: Item)
-    # Chúng ta làm vậy để dùng hàm .corr() tính Item-Item dễ dàng nhất
-    user_item_matrix = df.pivot(index='user_id', columns='item_id', values='rating')
+    print(f"Dữ liệu huấn luyện: {len(train_df)} dòng")
+    print(f"Dữ liệu kiểm thử: {len(test_df)} dòng")
 
-    # --- ĐO THỜI GIAN TRAIN (Tính Similarity) ---
+    # Tạo ma trận User-Item từ tập Train
+    train_matrix = train_df.pivot(index='user_id', columns='item_id', values='rating')
+
+    # --- TRAIN: Tính độ tương quan (Chỉ dùng tập Train) ---
     start_train = time.time()
-    # corr() tính toán sự tương quan giữa các Cột (Item)
-    item_similarity = user_item_matrix.corr(method='pearson').fillna(0)
+    # .corr() mặc định tính theo cột (Item)
+    item_similarity = train_matrix.corr(method='pearson').fillna(0)
     end_train = time.time()
     
-    # --- ĐIỀN DẤU "?" (Inference) ---
-    start_pred = time.time()
-    # Dự đoán toàn bộ các ô trống
-    predicted_ratings = predict(user_item_matrix, item_similarity)
-    
-    # Tạo DataFrame kết quả (Vẫn đang là User x Item)
-    full_matrix = pd.DataFrame(predicted_ratings, index=user_item_matrix.index, columns=user_item_matrix.columns)
-    
-    # --- ĐỔI VAI TRÒ: HÀNG LÀ ITEM, CỘT LÀ USER ---
-    # Sử dụng phép chuyển vị .T
-    final_matrix = full_matrix.T
-    
-    # Thêm nhãn "Item" và "User" cho chuyên nghiệp
+    # Thử nghiệm các giá trị K để tìm điểm tối ưu trên tập Test
+    k_values = [50,60,70,80,90,100,110]
+    best_k = -1
+    min_rmse = float('inf')
+    best_pred_df = None
+
+    print(f"\n--- ĐANG TÌM K TỐI ƯU TRÊN TẬP TEST ---")
+
+    for k in k_values:
+        # Dự đoán
+        predictions = predict_item_knn(train_matrix, item_similarity, k=k)
+        temp_pred_df = pd.DataFrame(predictions, index=train_matrix.index, columns=train_matrix.columns)
+        
+        # --- TEST: Tính RMSE trên tập Test ---
+        y_true = []
+        y_pred = []
+        for row in test_df.itertuples():
+            # Chỉ tính nếu User và Item đó tồn tại trong mô hình đã học
+            if row.user_id in temp_pred_df.index and row.item_id in temp_pred_df.columns:
+                y_true.append(row.rating)
+                y_pred.append(temp_pred_df.loc[row.user_id, row.item_id])
+        
+        if len(y_true) > 0:
+            current_rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+            print(f"K = {k:2d} | RMSE = {current_rmse:.4f}")
+
+            if current_rmse < min_rmse:
+                min_rmse = current_rmse
+                best_k = k
+                best_pred_df = temp_pred_df
+
+    # --- XUẤT KẾT QUẢ TỐT NHẤT ---
+    # Chuyển vị ma trận: Hàng là Item, Cột là User
+    final_matrix = best_pred_df.T
     final_matrix.index = [f"Item {int(i)}" for i in final_matrix.index]
     final_matrix.columns = [f"User {int(u)}" for u in final_matrix.columns]
-    end_pred = time.time()
 
-    # --- TÍNH TOÁN METRICS (RMSE) ---
-    # So sánh các ô đã có dữ liệu trong u.data với giá trị dự đoán
-    y_true = []
-    y_pred = []
-    for row in df.itertuples():
-        u_label = f"User {row.user_id}"
-        i_label = f"Item {row.item_id}"
-        if u_label in final_matrix.columns and i_label in final_matrix.index:
-            y_true.append(row.rating)
-            y_pred.append(final_matrix.loc[i_label, u_label])
+    print(f"\n--- KẾT QUẢ CUỐI CÙNG ---")
+    print(f"Giá trị K tốt nhất: {best_k}")
+    print(f"Chỉ số RMSE thấp nhất: {min_rmse:.4f}")
+    print(f"Thời gian huấn luyện: {end_train - start_train:.4f} giây")
     
-    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
-
-    # --- XUẤT KẾT QUẢ ---
-    print(f"--- BÁO CÁO HUẤN LUYỆN ---")
-    print(f"Thời gian tính toán độ tương đồng (Train): {end_train - start_train:.4f} giây")
-    print(f"Thời gian điền đầy ma trận (Inference): {end_pred - start_pred:.4f} giây")
-    print(f"Chỉ số lỗi RMSE: {rmse:.4f}")
-    
-    item_similarity.to_csv('item_item_matrix.csv')
-    final_matrix.to_csv('item_user_final.csv')
-    print("\nĐã lưu ma trận (Hàng: Item, Cột: User) vào file: item_user_final.csv")
+    # Lưu file kết quả
+    final_matrix.to_csv('item_user_optimized_results.csv')

@@ -27,7 +27,7 @@ style_css = """
     /* 2. Ẩn menu mặc định và footer của Streamlit */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    header {height: 0px !important; opacity: 0 !important;} 
+    header {display: none !important; pointer-events: none !important;}
 
     /* 3. KHÓA CUỘN SIDEBAR & ĐẨY PROFILE XUỐNG ĐÁY */
     /* Ẩn menu điều hướng mặc định */
@@ -198,7 +198,24 @@ def update_rating(u_id, m_id, new_rate):
     else:
         st.error("Lỗi khi lưu đánh giá!")
     
+def go_home():
+    st.session_state.page = "Trang chủ"
+    st.session_state.selected_idx = None
+    if 'search_input' in st.session_state:
+        st.session_state.search_input = ""
 
+def go_list():
+    st.session_state.page = "Danh sách"
+    st.session_state.selected_idx = None
+    if 'search_input' in st.session_state:
+        st.session_state.search_input = ""
+
+def go_detail(idx):
+    st.session_state.selected_idx = idx
+    st.session_state.page = "Chi tiết"
+    if 'search_input' in st.session_state:
+        st.session_state.search_input = ""
+        
 def display_grid(indices, cols=5):
     if not indices:
         st.warning("Không tìm thấy phim phù hợp.")
@@ -214,10 +231,7 @@ def display_grid(indices, cols=5):
                     st.image(p_url, use_container_width=True)
                     st.markdown(f'<div class="movie-title">{movie["title"]}</div>', unsafe_allow_html=True)
                     st.markdown(f'<div class="movie-genre">{movie["genre"]}</div>', unsafe_allow_html=True)
-                    if st.button("Chi tiết", key=f"grid_btn_{idx}"):
-                        st.session_state.selected_idx = idx
-                        st.session_state.page = "Chi tiết"
-                        st.rerun()
+                    st.button("Chi tiết", key=f"grid_btn_{idx}", on_click=go_detail, args=(idx,))
 
 # --- 5. LOGIC COLD START ---
 # is_new_user = (current_user_id is None) or (current_user_id not in u_data['user_id'].values)
@@ -279,17 +293,10 @@ if 'selected_idx' not in st.session_state:
 nav_c1, nav_c2, nav_c3, nav_c4 = st.columns([2, 1, 1, 3])
 with nav_c1: st.markdown("### Hệ thống gợi ý phim")
 with nav_c2: 
-    if st.button("Trang chủ"): 
-        st.session_state.page = "Trang chủ"
-        st.session_state.selected_idx = None
-        st.rerun()
+    st.button("Trang chủ", on_click=go_home)
 with nav_c3:
-    if st.button("Danh sách"): 
-        st.session_state.page = "Danh sách"
-        st.session_state.selected_idx = None
-        st.rerun()
-with nav_c4: search = st.text_input("", placeholder="Tìm kiếm phim...", label_visibility="collapsed")
-
+    st.button("Danh sách", on_click=go_list)
+with nav_c4: search = st.text_input("", placeholder="Tìm kiếm phim...", label_visibility="collapsed", key="search_input")
 st.divider()
 
 if search:
@@ -306,9 +313,7 @@ elif st.session_state.page == "Chi tiết" and st.session_state.selected_idx is 
     movie = df.iloc[st.session_state.selected_idx]
     movie_id = st.session_state.selected_idx + 1
     
-    if st.button("Quay lại"): 
-        st.session_state.page = "Trang chủ"
-        st.rerun()
+    st.button("Quay lại", on_click=go_home)
 
     c1, c2 = st.columns([1, 2])
     with c1: st.image(movie['poster_url'], use_container_width=True)

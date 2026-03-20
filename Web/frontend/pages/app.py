@@ -62,6 +62,13 @@ style_css = """
         object-fit: cover !important;
         border-radius: 10px;
         width: 100% !important;
+        transition: all 0.3s ease-in-out !important; /* Thêm transition cho mọi thay đổi */
+    }
+
+    /* Thêm hiệu ứng hover cho ảnh */
+    [data-testid="stImage"]:hover img {
+        transform: translateY(-8px) !important; /* Đẩy ảnh lên trên 8px */
+        box-shadow: 0px 15px 25px rgba(0,0,0,0.15) !important; /* Đổ bóng phía dưới */
     }
 
     .movie-title {

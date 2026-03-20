@@ -21,18 +21,33 @@ def predict_user_user_knn(ratings, similarity, k=40):
     
     for i in range(len(similarity)):
         # Tìm chỉ số của Top K người dùng tương đồng nhất với User i
-        top_k_users = np.argsort(similarity.iloc[i, :])[:-k-1:-1]
+        # Lấy mảng tương đồng của User i
+        sim_scores = similarity.iloc[i, :].copy()
+        # Loại bỏ chính User i khỏi danh sách (gán giá trị nhỏ nhất)
+        sim_scores.iloc[i] = -2 
+        
+        # Tìm chỉ số của Top K người dùng tương đồng nhất
+        top_k_users = np.argsort(sim_scores.values)[:-k-1:-1]
         
         # Lấy giá trị tương đồng của Top K láng giềng
         sim_top_k = similarity.iloc[i, top_k_users].values
         
         # Phép tính trung bình có trọng số chỉ trên Top K
-        sum_sim = np.abs(sim_top_k).sum()
-        if sum_sim != 0:
-            pred[i, :] = mean_user_rating[i] + sim_top_k.dot(ratings_diff[top_k_users, :]) / sum_sim
-        else:
-            # Nếu không có ai tương đồng, dùng điểm trung bình của chính User đó
-            pred[i, :] = mean_user_rating[i].flatten()
+        # Nhân với mask (để triệt tiêu trọng số của những người chưa xem thành 0).
+        has_rated_mask = (ratings_diff[top_k_users, :] != 0)
+        sum_sim_array = np.sum(np.abs(sim_top_k).reshape(-1, 1) * has_rated_mask, axis=0)
+        
+        # C. Xử lý chia cho 0: Nếu có phim nào mà cả K láng giềng đều chưa xem, gán = 1e-9 để tránh lỗi
+        sum_sim_array[sum_sim_array == 0] = 1e-9
+        
+        # --- DỰ ĐOÁN ---
+        
+        # Tính tử số (Kích thước: 1 chiều bằng số lượng phim)
+        numerator = sim_top_k.dot(ratings_diff[top_k_users, :])
+        
+        damping_factor = 3.0
+        # Lấy Điểm trung bình cộng với (Tử số / Mẫu số động)
+        pred[i, :] = mean_user_rating[i] + (numerator / (sum_sim_array + damping_factor))
             
     return pred
 

@@ -22,17 +22,34 @@ def predict_item_knn(train_matrix, similarity, k=10):
     for j in range(train_matrix.shape[1]): # Duyệt qua từng phim
         # Tìm Top K phim giống với phim j nhất
         # argsort trả về chỉ số tăng dần, lấy phần cuối và đảo ngược
-        top_k_indices = np.argsort(sim_matrix[:, j])[:-k-1:-1]
+        sim_col = sim_matrix[:, j].copy()
         
-        weights = sim_matrix[top_k_indices, j]
-        sum_weights = np.sum(np.abs(weights))
+        # Loại chính nó ra khỏi vòng pháp luật (gán độ tương đồng nhỏ nhất)
+        sim_col[j] = -2 
         
-        if sum_weights != 0:
-            # Dự đoán dựa trên trọng số của K láng giềng
-            pred[:, j] = mean_user_rating.flatten() + (ratings_diff[:, top_k_indices].dot(weights) / sum_weights)
-        else:
-            # Nếu không có láng giềng nào tương quan, dùng điểm trung bình của User
-            pred[:, j] = mean_user_rating.flatten()
+        # Tìm Top K (lúc này chắc chắn không còn lẫn Phim j)
+        top_k_indices = np.argsort(sim_col)[:-k-1:-1]
+        
+        # Lấy trọng số của đúng K láng giềng đó
+        weights = sim_col[top_k_indices]
+        # 1. Bit mask: Chỉ lấy những phim mà User thực sự đã rate
+        has_rated_mask = (ratings_diff[:, top_k_indices] != 0)
+        
+        # 2. Tính mẫu số thực tế (tổng độ tương đồng) ĐỘNG cho từng User
+        sum_weights = np.sum(has_rated_mask * np.abs(weights), axis=1)
+        
+        # 3. Tránh chia cho 0 nếu User chưa xem phim nào trong Top K
+        sum_weights[sum_weights == 0] = 1e-9
+        
+        # 4. Hệ số giảm xóc (Damping factor) để trị dữ liệu thưa thớt
+        damping_factor = 3.0 
+        
+        # --- DỰ ĐOÁN ---
+        # Tính tử số bằng phép nhân ma trận
+        numerator = ratings_diff[:, top_k_indices].dot(weights)
+        
+        # Điểm TB + (Tử số / (Mẫu số động + Giảm xóc))
+        pred[:, j] = mean_user_rating.flatten() + (numerator / (sum_weights + damping_factor))
             
     return pred
 

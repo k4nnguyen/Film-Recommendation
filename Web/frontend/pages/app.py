@@ -1,13 +1,13 @@
 import streamlit as st
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
-import os
+import requests
 
 # KIỂM TRA ĐĂNG NHẬP
 if 'logged_in' not in st.session_state or not st.session_state['logged_in']:
     st.warning("Vui lòng đăng nhập để sử dụng hệ thống!")
-    st.stop()
-
+    st.switch_page("login.py") # Chuyển người dùng về trang login nếu chưa đăng nhập
+    
 # --- 1. CẤU HÌNH & CSS ---
 st.set_page_config(
     page_title="Hệ thống Gợi ý Phim", 
@@ -128,41 +128,41 @@ def scroll_to_top():
     """
     st.markdown(js_scroll, unsafe_allow_html=True)
 
-# --- 2. LOAD DỮ LIỆU ---
+# --- 2. LOAD DỮ LIỆU TỪ BACKEND ---
+API_URL = "http://127.0.0.1:8000"
+
 @st.cache_data
-def load_data():
-    try:
-        df = pd.read_csv('../../crawl_data/data/movies_with_posters.csv', encoding='utf-8-sig')
-    except:
-        df = pd.read_csv('../../crawl_data/data/movies_metadata_encoded.csv', encoding='utf-8-sig')
+def load_base_data():
+    # 1. Gọi Backend lấy danh sách phim
+    resp_movies = requests.get(f"{API_URL}/movies")
+    df = pd.DataFrame(resp_movies.json())
     
-    try:
-        u_info = pd.read_csv('../../crawl_data/data/u.info', sep='\t', names=['user_id', 'username', 'password'], encoding='utf-8-sig')
-    except:
-        u_info = pd.DataFrame(columns=['user_id', 'username', 'password'])
+    # 2. Gọi Backend lấy danh sách thể loại
+    resp_genres = requests.get(f"{API_URL}/genres")
+    all_genres = resp_genres.json()
+    
+    return df, all_genres
 
-    try:
-        u_data = pd.read_csv('../../crawl_data/data/u.data', sep='\t', names=['user_id', 'movie_id', 'rating'], encoding='utf-8-sig')
-    except:
-        u_data = pd.DataFrame(columns=['user_id', 'movie_id', 'rating'])
+df, all_genres = load_base_data()
 
-    try:
-        genres_df = pd.read_csv('../../crawl_data/data/u.genre', sep='|', names=['genre', 'id'], encoding='utf-8-sig')
-        list_genres = genres_df['genre'].tolist()
-        if 'unknown' in list_genres: list_genres.remove('unknown')
-    except:
-        list_genres = []
-
-    features = df.select_dtypes(include=['number'])
-    sim_matrix = cosine_similarity(features)
-    return df, sim_matrix, u_info, u_data, list_genres
-
-df, sim_matrix, u_info, u_data, all_genres = load_data()
-
-# Xác định User ID hiện tại
+# Lấy thông tin username từ session_state
 username = st.session_state.get('username', 'Người dùng')
-user_row = u_info[u_info['username'] == username]
-current_user_id = user_row.iloc[0]['user_id'] if not user_row.empty else None
+
+# Lấy ID thực tế từ phiên đăng nhập
+current_user_id = st.session_state.get('user_id')
+
+# 3. Gọi Backend lấy lịch sử đánh giá của ĐÚNG user này
+if current_user_id:
+    resp_ratings = requests.get(f"{API_URL}/user-ratings/{current_user_id}")
+    data_json = resp_ratings.json()
+    
+    # KÍCH HOẠT KHIÊN BẢO VỆ: Kiểm tra xem list có rỗng không
+    if len(data_json) > 0:
+        u_data = pd.DataFrame(data_json)
+    else:
+        u_data = pd.DataFrame(columns=['user_id', 'movie_id', 'rating'])
+else:
+    u_data = pd.DataFrame(columns=['user_id', 'movie_id', 'rating'])
 
 # --- 3. THANH SIDEBAR  ---
 with st.sidebar:
@@ -181,16 +181,23 @@ with st.sidebar:
 # --- 4. HÀM HỖ TRỢ ---
 
 def update_rating(u_id, m_id, new_rate):
-    data_path = '../../crawl_data/data/u.data'
-    temp_u_data = pd.read_csv(data_path, sep='\t', names=['user_id', 'movie_id', 'rating'], encoding='utf-8-sig')
-    mask = (temp_u_data['user_id'] == u_id) & (temp_u_data['movie_id'] == m_id)
-    if temp_u_data[mask].empty:
-        new_row = pd.DataFrame([[u_id, m_id, new_rate]], columns=['user_id', 'movie_id', 'rating'])
-        temp_u_data = pd.concat([temp_u_data, new_row], ignore_index=True)
+    API_URL = "http://127.0.0.1:8000"
+    
+    # Đóng gói dữ liệu gửi lên API phải khớp với class RatingData bên backend
+    payload = {
+        "user_id": int(u_id),
+        "movie_id": int(m_id),
+        "rating": int(new_rate)
+    }
+    
+    # Gửi qua phương thức POST
+    response = requests.post(f"{API_URL}/update-rating", json=payload)
+    
+    if response.status_code == 200:
+        st.cache_data.clear() # Xóa cache giao diện để cập nhật lại số sao
     else:
-        temp_u_data.loc[mask, 'rating'] = new_rate
-    temp_u_data.to_csv(data_path, sep='\t', index=False, header=False, encoding='utf-8-sig')
-    st.cache_data.clear()
+        st.error("Lỗi khi lưu đánh giá!")
+    
 
 def display_grid(indices, cols=5):
     if not indices:
@@ -213,7 +220,8 @@ def display_grid(indices, cols=5):
                         st.rerun()
 
 # --- 5. LOGIC COLD START ---
-is_new_user = (current_user_id is None) or (current_user_id not in u_data['user_id'].values)
+# is_new_user = (current_user_id is None) or (current_user_id not in u_data['user_id'].values)
+is_new_user = u_data.empty
 
 if is_new_user:
     st.title("Chào mừng bạn đến với hệ thống")
@@ -223,17 +231,18 @@ if is_new_user:
     if len(selected_genres) == 3:
         st.divider()
         st.markdown("#### Bước 2: Chọn 3 bộ phim bạn thấy ấn tượng nhất:")
-        mask = df[selected_genres].any(axis=1)
-        filtered_movies = df[mask].head(20)
+        resp = requests.post(f"{API_URL}/movies/by-genres", json={"genres": selected_genres})
+        filtered_indices = resp.json().get("result_indices", [])
         num_cols = 5
         if 'cs_selected_titles' not in st.session_state: st.session_state.cs_selected_titles = []
         
-        for i in range(0, len(filtered_movies), num_cols):
+        for i in range(0, len(filtered_indices), num_cols):
             cols = st.columns(num_cols)
             for j in range(num_cols):
-                m_idx = i + j
-                if m_idx < len(filtered_movies):
-                    movie = filtered_movies.iloc[m_idx]
+                if i + j < len(filtered_indices):
+                    # Lấy index thực tế từ danh sách API trả về
+                    real_idx = filtered_indices[i + j]
+                    movie = df.iloc[real_idx]
                     with cols[j]:
                         st.image(movie['poster_url'] if pd.notna(movie['poster_url']) else "https://via.placeholder.com/300x450", use_container_width=True)
                         st.markdown(f'<div class="movie-title">{movie["title"]}</div>', unsafe_allow_html=True)
@@ -245,13 +254,18 @@ if is_new_user:
 
         if len(st.session_state.cs_selected_titles) == 3:
             if st.button("Hoàn tất thiết lập"):
-                new_entries = []
-                for m_title in st.session_state.cs_selected_titles:
-                    real_id = df[df['title'] == m_title].index[0] + 1
-                    new_entries.append([current_user_id, real_id, 5])
-                pd.DataFrame(new_entries).to_csv('../../crawl_data/data/u.data', mode='a', sep='\t', index=False, header=False, encoding='utf-8-sig')
+                # Gom 3 cái ID phim lại thành 1 list
+                selected_ids = [int(df[df['title'] == title].index[0] + 1) for title in st.session_state.cs_selected_titles]
+                
+                # Gọi API nhờ Backend lưu hộ
+                payload = {
+                    "user_id": int(current_user_id),
+                    "selected_movie_ids": selected_ids
+                }
+                requests.post(f"{API_URL}/cold-start", json=payload)
+                
+                # Reset giao diện
                 st.session_state.cs_selected_titles = []
-                st.cache_data.clear()
                 st.rerun()
     st.stop()
 
@@ -279,9 +293,10 @@ with nav_c4: search = st.text_input("", placeholder="Tìm kiếm phim...", label
 st.divider()
 
 if search:
-    res = df[df['title'].str.contains(search, case=False)].index.tolist()
+    search_res = requests.get(f"{API_URL}/search", params={"query":search})
+    res_indices = search_res.json().get("result_indices", [])
     st.title(f"Kết quả cho: '{search}'")
-    display_grid(res)
+    display_grid(res_indices)
 elif st.session_state.page == "Danh sách":
     scroll_to_top()
     st.title("Tất cả phim")
@@ -302,7 +317,8 @@ elif st.session_state.page == "Chi tiết" and st.session_state.selected_idx is 
         st.write(f"**Thể loại:** {movie['genre']}")
         st.write(f"**Quốc gia:** {movie['country'] if pd.notna(movie['country']) else 'N/A'}")
         st.write(f"**Ngày chiếu:** {movie['release_date']}")
-        st.link_button("Xem Review trên Momo", movie['url'])
+        if pd.notna(movie['url']):
+            st.link_button("Xem Review trên Momo", movie['url'])
         
         st.divider()
         st.write("**Đánh giá của bạn**")
@@ -320,11 +336,24 @@ elif st.session_state.page == "Chi tiết" and st.session_state.selected_idx is 
 
     st.divider()
     st.subheader("Gợi ý phim tương tự")
-    sim_scores = list(enumerate(sim_matrix[st.session_state.selected_idx]))
-    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)[1:11]
-    display_grid([x[0] for x in sim_scores])
+    try:
+        # Nhờ Backend tính toán và lấy về danh sách ID phim tương tự
+        recommend_res = requests.get(f"{API_URL}/recommend/{st.session_state.selected_idx}")
+        similar_indices = recommend_res.json()["recommend_indices"]
+    except:
+        st.warning("Hệ thống gợi ý đang bảo trì.")
+    # Nếu có các phim tương đồng thì hiển thị
+    if similar_indices:
+        display_grid(similar_indices)
 else:
     st.title("Phim mới đề xuất")
-    display_grid(list(range(len(df)))[:15])
-
+    trending_indices = []
+    try:
+        trending_res = requests.get(f"{API_URL}/movies/trending")
+        trending_indices = trending_res.json().get("trending_indices", [])
+    except:
+        st.warning("Hệ thống đề xuất đang bảo trì.")
+    # Nếu có các phim trending thì hiển thị
+    if trending_indices:
+        display_grid(trending_indices)
 st.markdown('<div class="footer"><p>Nguyễn Kim An - Nguyễn Tiến Đạt - Trần Đức Lâm - PTIT © 2026</p></div>', unsafe_allow_html=True)

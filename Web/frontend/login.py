@@ -1,7 +1,5 @@
 import streamlit as st
-import sqlite3
-import bcrypt
-import os
+import requests
 
 def load_css():
     st.markdown("""
@@ -55,85 +53,15 @@ def load_css():
 # ==========================================
 # 1. SETUP DATABASE & FILE
 # ==========================================
-def init_db():
-    conn = sqlite3.connect('users.db')
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            username TEXT PRIMARY KEY,
-            password TEXT NOT NULL
-        )
-    ''')
-    conn.commit()
-    conn.close()
 
-# Hàm lấy ID tiếp theo và lưu vào u.info
-def save_to_u_info(username, password):
-    file_path = '../../crawl_data/data/u.info'
-    next_id = 1
-    
-    # Kiểm tra nếu file đã tồn tại để lấy ID lớn nhất
-    if os.path.exists(file_path):
-        with open(file_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-            if lines:
-                # Lấy dòng cuối cùng và tách để lấy ID
-                last_line = lines[-1].strip()
-                if last_line:
-                    try:
-                        last_id = int(last_line.split('\t')[0])
-                        next_id = last_id + 1
-                    except ValueError:
-                        next_id = len(lines) + 1
-
-    # Ghi đè hoặc thêm mới vào file với định dạng id\tuser\tpass
-    with open(file_path, 'a', encoding='utf-8') as f:
-        f.write(f"{next_id}\t{username}\t{password}\n")
-
+API_URL = "http://127.0.0.1:8000"
 # ==========================================
-# 2. HÀM MÃ HÓA & THAO TÁC DB
-# ==========================================
-def hash_password(password):
-    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-
-def check_password(password, hashed):
-    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
-
-def add_user(username, password):
-    conn = sqlite3.connect('users.db')
-    c = conn.cursor()
-    try:
-        # Lưu vào SQLite (có mã hóa để bảo mật hệ thống login)
-        c.execute('INSERT INTO users (username, password) VALUES (?, ?)', 
-                  (username, hash_password(password)))
-        conn.commit()
-        
-        # Lưu vào u.info (không mã hóa theo yêu cầu)
-        save_to_u_info(username, password)
-        return True
-    except sqlite3.IntegrityError:
-        return False
-    finally:
-        conn.close()
-
-def login_user(username, password):
-    conn = sqlite3.connect('users.db')
-    c = conn.cursor()
-    c.execute('SELECT password FROM users WHERE username = ?', (username,))
-    data = c.fetchone()
-    conn.close()
-    if data:
-        return check_password(password, data[0])
-    return False
-
-# ==========================================
-# 3. GIAO DIỆN CHÍNH
+# GIAO DIỆN CHÍNH
 # ==========================================
 def main():
     st.set_page_config(page_title="Hệ thống Đăng nhập")
     load_css()
-    init_db()
-
+    
     if 'logged_in' not in st.session_state:
         st.session_state['logged_in'] = False
         st.session_state['username'] = ''
@@ -155,20 +83,34 @@ def main():
         if btn_login:
             if username == "" or password == "":
                 st.warning("Vui lòng nhập tên đăng nhập và mật khẩu!")
-            elif login_user(username, password):
-                st.session_state['logged_in'] = True
-                st.session_state['username'] = username
-                st.switch_page("pages/app.py")
             else:
-                st.error("Sai tên đăng nhập hoặc mật khẩu!")
-
+                try:
+                    # GỌI API ĐĂNG NHẬP
+                    res = requests.post(f"{API_URL}/login", json={"username": username, "password": password})
+                    if res.status_code == 200:
+                        data = res.json()
+                        st.session_state['logged_in'] = True
+                        st.session_state['username'] = data['username']
+                        st.session_state['user_id'] = data['user_id'] # Lưu luôn ID do Backend trả về
+                        
+                        st.switch_page("pages/app.py") 
+                    else:
+                        st.error(res.json().get("detail", "Sai tên đăng nhập hoặc mật khẩu!"))
+                except Exception as e:
+                    st.error("Không thể kết nối đến Backend! Vui lòng kiểm tra lại!")
         if btn_register:
             if username == "" or password == "":
                 st.warning("Vui lòng điền thông tin để đăng ký!")
-            elif add_user(username, password):
-                st.success("Đăng ký thành công! Bạn có thể bấm Đăng nhập.")
             else:
-                st.error("Tên đăng nhập đã tồn tại. Vui lòng chọn tên khác.")
+                try:
+                    # GỌI API ĐĂNG KÝ
+                    res = requests.post(f"{API_URL}/register", json={"username": username, "password": password})
+                    if res.status_code == 200:
+                        st.success("Đăng ký thành công! Bạn có thể bấm Đăng nhập.")
+                    else:
+                        st.error(res.json().get("detail", "Tên đăng nhập đã tồn tại. Vui lòng chọn tên khác."))
+                except Exception as e:
+                    st.error("Không thể kết nối đến Backend! Vui lòng kiểm tra lại!")
 
 if __name__ == '__main__':
     main()

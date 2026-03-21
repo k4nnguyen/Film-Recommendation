@@ -61,7 +61,7 @@ def register_user(user: UserAuth):
     finally:
         conn.close()
 
-@app.post("/login")
+@app.post("/login") 
 def login_user(user: UserAuth):
     conn = sqlite3.connect('users.db')
     c = conn.cursor()
@@ -165,7 +165,38 @@ def get_trending_movies():
         return {"trending_indices": trending_indices}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/cf-recommend/{idx}")
+def get_cf_recommendations(idx: int):
+    try:
+        # Tự động tìm đường dẫn file csv
+        cf_path = '../../crawl_data/data/item_user_optimized_results.csv'
+        if not os.path.exists(cf_path):
+            cf_path = 'item_user_optimized_results.csv'
+            
+        cf_matrix = pd.read_csv(cf_path, index_col=0)
         
+        # (Lấy cột User tương ứng với số thứ tự của phim)
+        col_name = f"User {idx}"
+        
+        if col_name in cf_matrix.columns:
+            # Cách ban đầu: sắp xếp và bóc tách chuỗi "Item X"
+            top_indices_str = cf_matrix[col_name].sort_values(ascending=False).head(10).index.tolist()
+            
+            top_indices = []
+            for idx_str in top_indices_str:
+                try:
+                    item_num = int(idx_str.split(' ')[1])
+                    top_indices.append(item_num - 1)
+                except:
+                    continue
+            
+            return {"recommend_indices": top_indices}
+        else:
+            return {"recommend_indices": []}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+            
 @app.post("/cold-start") # Hàm Cold Start cho người dùng mới
 def cold_start(data: ColdStartData):
     data_path = '../../crawl_data/data/u.data'
@@ -203,36 +234,5 @@ def update_rating(data: RatingData):
         
         temp_u_data.to_csv(data_path, sep='\t', index=False, header=False, encoding='utf-8-sig')
         return {"status": "success", "message": "Đã cập nhật đánh giá"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/cf-recommend/{idx}")
-def get_cf_recommendations(idx: int):
-    try:
-        # Tự động tìm đường dẫn file csv
-        cf_path = '../../crawl_data/data/item_user_optimized_results.csv'
-        if not os.path.exists(cf_path):
-            cf_path = 'item_user_optimized_results.csv'
-            
-        cf_matrix = pd.read_csv(cf_path)
-        
-        # (Lấy cột User tương ứng với số thứ tự của phim)
-        col_name = f"User {idx}"
-        
-        if col_name in cf_matrix.columns:
-            # Cách ban đầu: sắp xếp và bóc tách chuỗi "Item X"
-            top_indices_str = cf_matrix[col_name].sort_values(ascending=False).head(10).index.tolist()
-            
-            top_indices = []
-            for idx_str in top_indices_str:
-                try:
-                    item_num = int(idx_str.split(' ')[1])
-                    top_indices.append(item_num - 1)
-                except:
-                    continue
-            
-            return {"recommend_indices": top_indices}
-        else:
-            return {"recommend_indices": []}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

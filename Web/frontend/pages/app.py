@@ -223,7 +223,7 @@ def go_detail(idx):
     if 'search_input' in st.session_state:
         st.session_state.search_input = ""
         
-def display_grid(indices, cols=5):
+def display_grid(indices, cols=5, key_prefix="grid"):
     if not indices:
         st.warning("Không tìm thấy phim phù hợp.")
         return
@@ -238,7 +238,7 @@ def display_grid(indices, cols=5):
                     st.image(p_url, use_container_width=True)
                     st.markdown(f'<div class="movie-title">{movie["title"]}</div>', unsafe_allow_html=True)
                     st.markdown(f'<div class="movie-genre">{movie["genre"]}</div>', unsafe_allow_html=True)
-                    st.button("Chi tiết", key=f"grid_btn_{idx}", on_click=go_detail, args=(idx,))
+                    st.button("Chi tiết", key=f"{key_prefix}_btn_{idx}", on_click=go_detail, args=(idx,))
 
 # --- 5. LOGIC COLD START ---
 # is_new_user = (current_user_id is None) or (current_user_id not in u_data['user_id'].values)
@@ -310,11 +310,11 @@ if search:
     search_res = requests.get(f"{API_URL}/search", params={"query":search})
     res_indices = search_res.json().get("result_indices", [])
     st.title(f"Kết quả cho: '{search}'")
-    display_grid(res_indices)
+    display_grid(res_indices, key_prefix="search")
 elif st.session_state.page == "Danh sách":
     scroll_to_top()
     st.title("Tất cả phim")
-    display_grid(list(range(len(df))))
+    display_grid(list(range(len(df))), key_prefix="all")
 elif st.session_state.page == "Chi tiết" and st.session_state.selected_idx is not None:
     scroll_to_top()
     movie = df.iloc[st.session_state.selected_idx]
@@ -349,18 +349,20 @@ elif st.session_state.page == "Chi tiết" and st.session_state.selected_idx is 
     st.subheader("Có thể bạn cũng thích")
     try:
         # Gọi API Collaborative Filtering cho User hiện tại
-        cf_res = requests.get(f"{API_URL}/cf-recommend/{st.session_state.selected_idx}")
+        cf_res = requests.get(f"{API_URL}/cf-recommend/{current_user_id}")
         cf_indices = cf_res.json().get("recommend_indices", [])
         
         # Lọc bỏ phim hiện tại ra khỏi danh sách gợi ý và chỉ lấy đúng 5 phim đầu tiên
+        if st.session_state.selected_idx in cf_indices:
+            cf_indices.remove(st.session_state.selected_idx)
         cf_indices = cf_indices[:5]
     except Exception as e:
         st.warning("Hệ thống gợi ý CF đang bảo trì.")
         cf_indices = []
     if cf_indices:
-        display_grid(cf_indices)
+        display_grid(cf_indices, key_prefix="cf")
     else:
-        st.info("Chưa có đủ dữ liệu hành vi để đưa ra gợi ý cho riêng bạn.")
+        st.info("Hãy đánh giá thêm vài bộ phim để hệ thống học được gu của bạn nhé!")
     st.divider()
     st.subheader("Gợi ý phim tương tự")
     try:
@@ -371,7 +373,7 @@ elif st.session_state.page == "Chi tiết" and st.session_state.selected_idx is 
         st.warning("Hệ thống gợi ý đang bảo trì.")
     # Nếu có các phim tương đồng thì hiển thị
     if similar_indices:
-        display_grid(similar_indices)
+        display_grid(similar_indices, key_prefix="sim")
 else:
     st.title("Phim mới đề xuất")
     trending_indices = []
@@ -382,5 +384,5 @@ else:
         st.warning("Hệ thống đề xuất đang bảo trì.")
     # Nếu có các phim trending thì hiển thị
     if trending_indices:
-        display_grid(trending_indices)
+        display_grid(trending_indices, key_prefix="trend")
 st.markdown('<div class="footer"><p>Nguyễn Kim An - Nguyễn Tiến Đạt - Trần Đức Lâm - PTIT © 2026</p></div>', unsafe_allow_html=True)

@@ -345,7 +345,22 @@ elif st.session_state.page == "Chi tiết" and st.session_state.selected_idx is 
                     update_rating(current_user_id, movie_id, i)
                     st.rerun()
         st.caption(f"Bạn đang đánh giá {curr_stars} sao." if curr_stars > 0 else "Hãy bấm vào ngôi sao để đánh giá.")
-
+    st.divider()
+    st.subheader("Có thể bạn cũng thích")
+    try:
+        # Gọi API Collaborative Filtering cho User hiện tại
+        cf_res = requests.get(f"{API_URL}/cf-recommend/{st.session_state.selected_idx}")
+        cf_indices = cf_res.json().get("recommend_indices", [])
+        
+        # Lọc bỏ phim hiện tại ra khỏi danh sách gợi ý và chỉ lấy đúng 5 phim đầu tiên
+        cf_indices = cf_indices[:5]
+    except Exception as e:
+        st.warning("Hệ thống gợi ý CF đang bảo trì.")
+        cf_indices = []
+    if cf_indices:
+        display_grid(cf_indices)
+    else:
+        st.info("Chưa có đủ dữ liệu hành vi để đưa ra gợi ý cho riêng bạn.")
     st.divider()
     st.subheader("Gợi ý phim tương tự")
     try:

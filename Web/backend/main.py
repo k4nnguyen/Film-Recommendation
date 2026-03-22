@@ -1,6 +1,9 @@
 from fastapi import FastAPI, HTTPException
+import numpy as np
 import pandas as pd
+import asyncio
 from pydantic import BaseModel
+from sklearn.metrics import mean_squared_error
 from sklearn.metrics.pairwise import cosine_similarity
 import os 
 from typing import List
@@ -25,6 +28,7 @@ try:
 except Exception as e:
     print("Lỗi đọc file CF:", e)
     cf_sim_matrix = []
+    
 # =============== 
 #     login.py
 # ===============
@@ -84,6 +88,124 @@ def login_user(user: UserAuth):
 #     main.py
 # ===============
 
+# ======= Vong lap de auto update real time =======
+DATA_DIR = "../../crawl_data/data/"
+movies_df = None
+predictions_df = None # Lưu ma trận dự đoán (Users x Items)
+u_info = None
+
+def predict_item_knn(train_matrix, similarity_matrix, k=10):
+    pred = np.zeros(train_matrix.shape)
+    mean_user_rating = train_matrix.mean(axis=1).values.reshape(-1, 1)
+    ratings_diff = (train_matrix - mean_user_rating).fillna(0).values
+    
+    sim_matrix = similarity_matrix.values
+    
+    for j in range(train_matrix.shape[1]):
+        sim_col = sim_matrix[:, j].copy()
+        sim_col[j] = -2 
+        top_k_indices = np.argsort(sim_col)[:-k-1:-1]
+        weights = sim_col[top_k_indices]
+        
+        has_rated_mask = (ratings_diff[:, top_k_indices] != 0)
+        sum_weights = np.sum(has_rated_mask * np.abs(weights), axis=1)
+        sum_weights[sum_weights == 0] = 1e-9
+        
+        damping_factor = 3.0 
+        numerator = ratings_diff[:, top_k_indices].dot(weights)
+        pred[:, j] = mean_user_rating.flatten() + (numerator / (sum_weights + damping_factor))
+            
+    return pred
+
+def update_recommender_system():
+    global movies_df, predictions_df, u_info
+    print("  Đang huấn luyện lại mô hình Item-Item KNN...")
+
+    try:
+        # Load dữ liệu phim để hiển thị tên
+        movies_df = pd.read_csv(DATA_DIR + 'movies_with_posters.csv', encoding='utf-8-sig')
+        u_info = pd.read_csv(DATA_DIR + 'u.info', sep='\t', names=['user_id', 'username', 'password'])
+        
+        # Load u.data 
+        raw_data = pd.read_csv(DATA_DIR + 'u.data', sep='\t', names=['user_id', 'movie_id', 'rating'])
+        
+        # Tạo ma trận User-Item
+        train_matrix = raw_data.pivot(index='user_id', columns='movie_id', values='rating')
+        
+        # Tính độ tương quan Pearson giữa các Item
+        item_similarity = train_matrix.corr(method='pearson').fillna(0)
+        
+        # Tìm K tối ưu (Sử dụng danh sách K của bạn)
+        best_k = 80
+        
+        # Tính toán ma trận dự đoán cuối cùng
+        final_predictions = predict_item_knn(train_matrix, item_similarity, k=best_k)
+        
+        # Chuyển về DataFrame để dễ truy vấn theo UserID
+        predictions_df = pd.DataFrame(final_predictions, index=train_matrix.index, columns=train_matrix.columns)
+        
+        final_matrix_export = predictions_df.T
+        final_matrix_export.index = [f"Item {int(i)}" for i in final_matrix_export.index]
+        final_matrix_export.columns = [f"User {int(u)}" for u in final_matrix_export.columns]
+        # Ghi đè trực tiếp vào file kết quả
+        final_matrix_export.to_csv('../../crawl_data/data/item_user_optimized_results.csv')
+        print(f"    Đã cập nhật xong ma trận dự đoán. Best K dùng: {best_k}")
+        
+    except Exception as e:
+        print(f"    Lỗi trong quá trình cập nhật: {e}")
+
+# --- 3. VÒNG LẶP CHẠY NGẦM ---
+async def update_periodically():
+    while True:
+        update_recommender_system()
+        await asyncio.sleep(30) # Cập nhật mỗi 30 giây
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(update_periodically())
+
+@app.get("/init-data")
+def get_init_data():
+    return {
+        "movies": movies_df.fillna("").to_dict(orient="records") if movies_df is not None else [],
+        "users": u_info.to_dict(orient="records") if u_info is not None else []
+    }
+
+@app.get("/recommend-for-user/{user_id}")
+def get_personal_recommendations(user_id: int):
+    if predictions_df is None or user_id not in predictions_df.index:
+        return []
+    
+    # Lấy các điểm dự đoán của User này
+    user_preds = predictions_df.loc[user_id]
+    
+    # Lọc bỏ các phim mà người dùng ĐÃ đánh giá rồi 
+    # Lấy dữ liệu rating hiện tại từ file hoặc biến toàn cục
+    u_data_current = pd.read_csv(DATA_DIR + 'u.data', sep='\t', names=['user_id', 'movie_id', 'rating'])
+    user_rated_ids = u_data_current[u_data_current['user_id'] == user_id]['movie_id'].tolist()
+    
+    # Bỏ qua các phim đã rate
+    user_preds = user_preds.drop(labels=user_rated_ids, errors='ignore')
+
+    # 3. Sắp xếp lấy Top 15 movie_id có điểm dự đoán cao nhất
+    top_movie_ids = user_preds.sort_values(ascending=False).head(15).index.tolist()
+    
+    recommend_indices = [int(mid) - 1 for mid in top_movie_ids]
+    
+    return recommend_indices
+
+@app.get("/user-status/{username}")
+def get_user_status(username: str):
+    if u_info is None: return {"exists": False}
+    row = u_info[u_info['username'] == username]
+    if row.empty: return {"exists": False}
+    
+    uid = int(row.iloc[0]['user_id'])
+    # Kiểm tra xem đã có trong ma trận dự đoán chưa
+    is_new = uid not in predictions_df.index if predictions_df is not None else True
+    return {"exists": True, "user_id": uid, "is_new": is_new}
+
+# ===============================================================
 
 # Khai báo để tạo class Rating (Gồm id ng dùng, id phim, số rate)
 class RatingData(BaseModel):

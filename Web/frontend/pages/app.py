@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-from sklearn.metrics.pairwise import cosine_similarity
 import requests
 
 # KIỂM TRA ĐĂNG NHẬP
@@ -160,19 +159,27 @@ current_user_id = st.session_state.get('user_id')
 
 # 3. Gọi Backend lấy lịch sử đánh giá của ĐÚNG user này
 if current_user_id:
-    resp_ratings = requests.get(f"{API_URL}/user-ratings/{current_user_id}")
-    data_json = resp_ratings.json()
-    
-    # KÍCH HOẠT KHIÊN BẢO VỆ: Kiểm tra xem list có rỗng không
-    if len(data_json) > 0:
-        u_data = pd.DataFrame(data_json)
-    else:
-        u_data = pd.DataFrame(columns=['user_id', 'movie_id', 'rating'])
+    if 'u_data' not in st.session_state or st.sidebar.button("🔄 Làm mới dữ liệu"):
+        resp_ratings = requests.get(f"{API_URL}/user-ratings/{current_user_id}")
+        data_json = resp_ratings.json()
+        if data_json:
+            if isinstance(data_json, list):
+                st.session_state['u_data'] = pd.DataFrame(data_json)
+            else:
+                st.session_state['u_data'] = pd.DataFrame([data_json])
+        else:
+            st.session_state['u_data'] = pd.DataFrame(columns=['user_id', 'movie_id', 'rating'])
+    u_data = st.session_state['u_data']
 else:
     u_data = pd.DataFrame(columns=['user_id', 'movie_id', 'rating'])
 
 # --- 3. THANH SIDEBAR  ---
 with st.sidebar:
+    try:
+        time_info = requests.get(f"{API_URL}/get-update-status").json()
+        st.caption(f"Ma trận cập nhật lúc: {time_info['last_update']}")
+    except:
+        pass
     st.markdown('<div class="sidebar-footer">', unsafe_allow_html=True)
     st.markdown("### Thông tin cá nhân")
     st.write(f"Chào ngày mới, **{username}**!")
@@ -201,7 +208,9 @@ def update_rating(u_id, m_id, new_rate):
     response = requests.post(f"{API_URL}/update-rating", json=payload)
     
     if response.status_code == 200:
-        st.cache_data.clear() # Xóa cache giao diện để cập nhật lại số sao
+        resp_ratings = requests.get(f"{API_URL}/user-ratings/{u_id}")
+        st.session_state['u_data'] = pd.DataFrame(resp_ratings.json())
+        st.toast(f"Đã ghi nhận {new_rate} sao!")
     else:
         st.error("Lỗi khi lưu đánh giá!")
     
@@ -223,22 +232,23 @@ def go_detail(idx):
     if 'search_input' in st.session_state:
         st.session_state.search_input = ""
         
-def display_grid(indices, cols=5):
+def display_grid(indices, cols=5, key_prefix="grid"):
     if not indices:
         st.warning("Không tìm thấy phim phù hợp.")
         return
-    for i in range(0, len(indices), cols):
+    unique_indices = list(dict.fromkeys(indices))
+    for i in range(0, len(unique_indices), cols):
         columns = st.columns(cols)
         for j in range(cols):
-            if i + j < len(indices):
-                idx = indices[i+j]
+            if i + j < len(unique_indices):
+                idx = unique_indices[i+j]
                 movie = df.iloc[idx]
                 with columns[j]:
                     p_url = movie['poster_url'] if 'poster_url' in movie and pd.notna(movie['poster_url']) else "https://via.placeholder.com/300x450"
                     st.image(p_url, use_container_width=True)
                     st.markdown(f'<div class="movie-title">{movie["title"]}</div>', unsafe_allow_html=True)
                     st.markdown(f'<div class="movie-genre">{movie["genre"]}</div>', unsafe_allow_html=True)
-                    st.button("Chi tiết", key=f"grid_btn_{idx}", on_click=go_detail, args=(idx,))
+                    st.button("Chi tiết", key=f"{key_prefix}_btn_{idx}_{i}_{j}", on_click=go_detail, args=(idx,))
 
 # --- 5. LOGIC COLD START ---
 # is_new_user = (current_user_id is None) or (current_user_id not in u_data['user_id'].values)
@@ -284,7 +294,8 @@ if is_new_user:
                     "selected_movie_ids": selected_ids
                 }
                 requests.post(f"{API_URL}/cold-start", json=payload)
-                
+                if 'u_data' in st.session_state:
+                    del st.session_state['u_data'] # Xóa để vòng sau nó load lại dữ liệu mới có phim
                 # Reset giao diện
                 st.session_state.cs_selected_titles = []
                 st.rerun()
@@ -310,11 +321,11 @@ if search:
     search_res = requests.get(f"{API_URL}/search", params={"query":search})
     res_indices = search_res.json().get("result_indices", [])
     st.title(f"Kết quả cho: '{search}'")
-    display_grid(res_indices)
+    display_grid(res_indices, key_prefix="search")
 elif st.session_state.page == "Danh sách":
     scroll_to_top()
     st.title("Tất cả phim")
-    display_grid(list(range(len(df))))
+    display_grid(list(range(len(df))), key_prefix="all")
 elif st.session_state.page == "Chi tiết" and st.session_state.selected_idx is not None:
     scroll_to_top()
     movie = df.iloc[st.session_state.selected_idx]
@@ -345,7 +356,29 @@ elif st.session_state.page == "Chi tiết" and st.session_state.selected_idx is 
                     update_rating(current_user_id, movie_id, i)
                     st.rerun()
         st.caption(f"Bạn đang đánh giá {curr_stars} sao." if curr_stars > 0 else "Hãy bấm vào ngôi sao để đánh giá.")
+    st.divider()
+    st.subheader("Có thể bạn cũng thích")
+    try:
+        # Gọi API Collaborative Filtering cho User hiện tại
+        cf_res = requests.get(f"{API_URL}/recommend-for-user/{current_user_id}")
+        if cf_res.status_code == 200:
+            cf_indices = cf_res.json()
+            # Lọc bỏ phim đang xem (selected_idx) khỏi danh sách gợi ý
+            current_idx = st.session_state.selected_idx
+            cf_indices = [idx for idx in cf_indices if idx != current_idx]
 
+            # Hiển thị 5 phim đầu tiên
+            if cf_indices:
+                display_grid(cf_indices[:5], key_prefix="cf")
+            else:
+                st.info("Đang cập nhật thể loại yêu thích của bạn, hãy đánh giá thêm vài bộ phim nhé!")
+        else:
+            st.info("Hệ thống đang huấn luyện lại mô hình...")
+    except Exception as e:
+        st.warning("Hệ thống gợi ý CF đang bảo trì.")
+        cf_indices = []
+    else:
+        st.info("Hãy đánh giá thêm vài bộ phim để hệ thống học được gu của bạn nhé!")
     st.divider()
     st.subheader("Gợi ý phim tương tự")
     try:
@@ -356,7 +389,7 @@ elif st.session_state.page == "Chi tiết" and st.session_state.selected_idx is 
         st.warning("Hệ thống gợi ý đang bảo trì.")
     # Nếu có các phim tương đồng thì hiển thị
     if similar_indices:
-        display_grid(similar_indices)
+        display_grid(similar_indices, key_prefix="sim")
 else:
     st.title("Phim mới đề xuất")
     trending_indices = []
@@ -367,5 +400,5 @@ else:
         st.warning("Hệ thống đề xuất đang bảo trì.")
     # Nếu có các phim trending thì hiển thị
     if trending_indices:
-        display_grid(trending_indices)
+        display_grid(trending_indices, key_prefix="trend")
 st.markdown('<div class="footer"><p>Nguyễn Kim An - Nguyễn Tiến Đạt - Trần Đức Lâm - PTIT © 2026</p></div>', unsafe_allow_html=True)

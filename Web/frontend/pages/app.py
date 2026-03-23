@@ -163,7 +163,13 @@ if current_user_id:
     if 'u_data' not in st.session_state or st.sidebar.button("🔄 Làm mới dữ liệu"):
         resp_ratings = requests.get(f"{API_URL}/user-ratings/{current_user_id}")
         data_json = resp_ratings.json()
-        st.session_state['u_data'] = pd.DataFrame(data_json) if data_json else pd.DataFrame(columns=['user_id', 'movie_id', 'rating'])
+        if data_json:
+            if isinstance(data_json, list):
+                st.session_state['u_data'] = pd.DataFrame(data_json)
+            else:
+                st.session_state['u_data'] = pd.DataFrame([data_json])
+        else:
+            st.session_state['u_data'] = pd.DataFrame(columns=['user_id', 'movie_id', 'rating'])
     u_data = st.session_state['u_data']
 else:
     u_data = pd.DataFrame(columns=['user_id', 'movie_id', 'rating'])
@@ -289,7 +295,8 @@ if is_new_user:
                     "selected_movie_ids": selected_ids
                 }
                 requests.post(f"{API_URL}/cold-start", json=payload)
-                
+                if 'u_data' in st.session_state:
+                    del st.session_state['u_data'] # Xóa để vòng sau nó load lại dữ liệu mới có phim
                 # Reset giao diện
                 st.session_state.cs_selected_titles = []
                 st.rerun()

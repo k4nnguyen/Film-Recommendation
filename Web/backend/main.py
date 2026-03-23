@@ -9,7 +9,7 @@ import os
 from typing import List
 import sqlite3
 import bcrypt
-
+import datetime 
 app = FastAPI()
 df = pd.read_csv('../../crawl_data/data/movies_with_posters.csv')
 features = df.select_dtypes(include=['number'])
@@ -118,7 +118,7 @@ def predict_item_knn(train_matrix, similarity_matrix, k=10):
     return pred
 
 def update_recommender_system():
-    global movies_df, predictions_df, u_info
+    global movies_df, predictions_df, u_info, last_update
     print("  Đang huấn luyện lại mô hình Item-Item KNN...")
 
     try:
@@ -128,6 +128,7 @@ def update_recommender_system():
         
         # Load u.data 
         raw_data = pd.read_csv(DATA_DIR + 'u.data', sep='\t', names=['user_id', 'movie_id', 'rating'])
+        raw_data.drop_duplicates(subset=['user_id', 'movie_id'], keep='last')
         
         # Tạo ma trận User-Item
         train_matrix = raw_data.pivot(index='user_id', columns='movie_id', values='rating')
@@ -150,7 +151,7 @@ def update_recommender_system():
         # Ghi đè trực tiếp vào file kết quả
         final_matrix_export.to_csv('../../crawl_data/data/item_user_optimized_results.csv')
         print(f"    Đã cập nhật xong ma trận dự đoán. Best K dùng: {best_k}")
-        
+        last_update = datetime.datetime.now().strftime("%H:%M:%S")
     except Exception as e:
         print(f"    Lỗi trong quá trình cập nhật: {e}")
 
@@ -159,6 +160,10 @@ async def update_periodically():
     while True:
         update_recommender_system()
         await asyncio.sleep(30) # Cập nhật mỗi 30 giây
+
+@app.get("/get-update-status")
+def get_update_status():
+    return {"last_update": last_update}
 
 @app.on_event("startup")
 async def startup_event():

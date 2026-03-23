@@ -5,16 +5,18 @@ import asyncio
 from pydantic import BaseModel
 from sklearn.metrics import mean_squared_error
 from sklearn.metrics.pairwise import cosine_similarity
+from concurrent.futures import ProcessPoolExecutor
 import os 
 from typing import List
 import sqlite3
 import bcrypt
 import datetime 
 app = FastAPI()
+executor = ProcessPoolExecutor(max_workers=1)
 df = pd.read_csv('../../crawl_data/data/movies_with_posters.csv')
 features = df.select_dtypes(include=['number'])
 sim_matrix = cosine_similarity(features)
-
+last_update = "Đang khởi tạo..."
 try:
     cf_path = '../../crawl_data/data/item_user_optimized_results.csv'
     if not os.path.exists(cf_path):
@@ -128,7 +130,7 @@ def update_recommender_system():
         
         # Load u.data 
         raw_data = pd.read_csv(DATA_DIR + 'u.data', sep='\t', names=['user_id', 'movie_id', 'rating'])
-        raw_data.drop_duplicates(subset=['user_id', 'movie_id'], keep='last')
+        raw_data = raw_data.drop_duplicates(subset=['user_id', 'movie_id'], keep='last')
         
         # Tạo ma trận User-Item
         train_matrix = raw_data.pivot(index='user_id', columns='movie_id', values='rating')
@@ -152,14 +154,25 @@ def update_recommender_system():
         final_matrix_export.to_csv('../../crawl_data/data/item_user_optimized_results.csv')
         print(f"    Đã cập nhật xong ma trận dự đoán. Best K dùng: {best_k}")
         last_update = datetime.datetime.now().strftime("%H:%M:%S")
+        return predictions_df
     except Exception as e:
         print(f"    Lỗi trong quá trình cập nhật: {e}")
 
 # --- 3. VÒNG LẶP CHẠY NGẦM ---
 async def update_periodically():
+    global predictions_df, last_update
+    loop = asyncio.get_event_loop()
     while True:
-        update_recommender_system()
-        await asyncio.sleep(30) # Cập nhật mỗi 30 giây
+        try:
+            new_predictions = await loop.run_in_executor(executor, update_recommender_system)
+            if new_predictions is not None:
+                predictions_df = new_predictions
+                last_update = datetime.datetime.now().strftime("%H:%M:%S")
+                # 2. In ra lúc hoàn thành thành công
+                print(f"[{last_update}] Cập nhật ma trận thành công.")    
+        except Exception as e:
+            print(f"Lỗi vòng lặp: {e}")
+        await asyncio.sleep(30)
 
 @app.get("/get-update-status")
 def get_update_status():
@@ -296,31 +309,23 @@ def get_trending_movies():
 @app.get("/cf-recommend/{idx}")
 def get_cf_recommendations(idx: int):
     try:
-        # Tự động tìm đường dẫn file csv
-        cf_path = '../../crawl_data/data/item_user_optimized_results.csv'
-        if not os.path.exists(cf_path):
-            cf_path = 'item_user_optimized_results.csv'
-            
-        cf_matrix = pd.read_csv(cf_path, index_col=0)
-        
-        # (Lấy cột User tương ứng với số thứ tự của phim)
-        col_name = f"User {idx}"
-        
-        if col_name in cf_matrix.columns:
-            # Cách ban đầu: sắp xếp và bóc tách chuỗi "Item X"
-            top_indices_str = cf_matrix[col_name].sort_values(ascending=False).head(10).index.tolist()
-            
-            top_indices = []
-            for idx_str in top_indices_str:
-                try:
-                    item_num = int(idx_str.split(' ')[1])
-                    top_indices.append(item_num - 1)
-                except:
-                    continue
-            
-            return {"recommend_indices": top_indices}
-        else:
+        # Dùng trực tiếp biến predictions_df (dữ liệu live)
+        if predictions_df is None or idx not in predictions_df.index:
             return {"recommend_indices": []}
+        
+        # Lấy điểm dự đoán của User {idx} từ RAM
+        user_preds = predictions_df.loc[idx]
+        
+        # Lấy danh sách phim user này đã rate để lọc bỏ (để thấy gợi ý mới)
+        u_data_current = pd.read_csv(DATA_DIR + 'u.data', sep='\t', names=['user_id', 'movie_id', 'rating'])
+        rated_ids = u_data_current[u_data_current['user_id'] == idx]['movie_id'].tolist()
+        user_preds = user_preds.drop(labels=rated_ids, errors='ignore')
+        
+        # Sắp xếp lấy Top 10 movie_id cao nhất và đổi sang index (mid - 1)
+        top_movie_ids = user_preds.sort_values(ascending=False).head(10).index.tolist()
+        top_indices = [int(mid) - 1 for mid in top_movie_ids]
+        
+        return {"recommend_indices": top_indices}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
             

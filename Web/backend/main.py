@@ -11,11 +11,28 @@ from typing import List
 import sqlite3
 import bcrypt
 import datetime 
+import base64
+from io import BytesIO
+import matplotlib.pyplot as plt
+from wordcloud import WordCloud
+
 app = FastAPI()
 executor = ProcessPoolExecutor(max_workers=1)
 df = pd.read_csv('../../crawl_data/data/movies_with_posters.csv')
 features = df.select_dtypes(include=['number'])
 sim_matrix = cosine_similarity(features)
+
+# Load reviews dataset
+try:
+    raw_reviews_df = pd.read_csv('../../crawl_data/data/movie_reviews.csv')
+    reviews_df = pd.read_csv('../../crawl_data/data/movie_reviews_cleaned.csv')
+    # Thêm cột bình luận gốc vào reviews_df
+    reviews_df['original_comment'] = raw_reviews_df['comment']
+except Exception as e:
+    print("Lỗi đọc file reviews:", e)
+    reviews_df = pd.DataFrame(columns=['rating', 'clean_comment', 'Movie_Title', 'original_comment'])
+
+
 last_update = "Đang khởi tạo..."
 try:
     cf_path = '../../crawl_data/data/item_user_optimized_results.csv'
@@ -368,3 +385,69 @@ def update_rating(data: RatingData):
         return {"status": "success", "message": "Đã cập nhật đánh giá"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/movie-reviews/{title}")
+def get_movie_reviews(title: str):
+    if reviews_df.empty:
+        return {"reviews": [], "wordcloud_base64": None, "pos_ratio": 0, "neg_ratio": 0, "total_reviews": 0}
+    
+    # Lọc comments theo title
+    movie_reviews = reviews_df[reviews_df['Movie_Title'].str.lower() == title.lower()]
+    
+    # Lọc bỏ các bình luận "không_bình_luận" hoặc trống
+    movie_reviews = movie_reviews[
+        ~movie_reviews['clean_comment'].astype(str).str.contains('không_bình_luận', case=False, na=False) &
+        (movie_reviews['clean_comment'].astype(str).str.strip() != '') &
+        ~movie_reviews['original_comment'].astype(str).str.contains('không_bình_luận', case=False, na=False)
+    ]
+
+    if movie_reviews.empty:
+        return {"reviews": [], "wordcloud_base64": None, "pos_ratio": 0, "neg_ratio": 0, "total_reviews": 0}
+    
+    # Tính tỉ lệ khen chê (>= 8 là khen, <= 5 là chê)
+    total_reviews = len(movie_reviews)
+    pos_reviews = len(movie_reviews[movie_reviews['rating'] >= 8])
+    neg_reviews = len(movie_reviews[movie_reviews['rating'] <= 5])
+    
+    pos_ratio = int((pos_reviews / total_reviews) * 100) if total_reviews > 0 else 0
+    neg_ratio = int((neg_reviews / total_reviews) * 100) if total_reviews > 0 else 0
+    
+    # Lấy 5 comments nổi bật nhất (rating cao nhất)
+    top_reviews = movie_reviews.sort_values(by='rating', ascending=False).head(5)
+    
+    # Đổi sang sử dụng 'original_comment' thay vì 'clean_comment'
+    reviews_list = []
+    for _, row in top_reviews.iterrows():
+        comment_text = row['original_comment'] if pd.notna(row['original_comment']) else row['clean_comment']
+        reviews_list.append({
+            'rating': row['rating'],
+            'clean_comment': comment_text # Frontend vẫn dùng key 'clean_comment' nhưng dữ liệu là comment gốc
+        })
+    
+    # Nối tất cả text (dùng clean_comment cho wordcloud để tối ưu)
+    all_text = " ".join(movie_reviews['clean_comment'].dropna().astype(str).tolist())
+    
+    # Tạo wordcloud
+    wordcloud_base64 = None
+    if all_text.strip():
+        try:
+            # Dùng colormap đẹp mắt
+            wc = WordCloud(width=800, height=400, background_color='white', colormap='viridis', max_words=100).generate(all_text)
+            plt.figure(figsize=(10, 5))
+            plt.imshow(wc, interpolation='bilinear')
+            plt.axis('off')
+            buf = BytesIO()
+            plt.savefig(buf, format='png', bbox_inches='tight')
+            buf.seek(0)
+            wordcloud_base64 = base64.b64encode(buf.read()).decode('utf-8')
+            plt.close()
+        except Exception as e:
+            print("Error generating wordcloud:", e)
+    
+    return {
+        "reviews": reviews_list, 
+        "wordcloud_base64": wordcloud_base64,
+        "pos_ratio": pos_ratio,
+        "neg_ratio": neg_ratio,
+        "total_reviews": total_reviews
+    }

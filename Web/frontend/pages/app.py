@@ -356,6 +356,43 @@ elif st.session_state.page == "Chi tiết" and st.session_state.selected_idx is 
                     update_rating(current_user_id, movie_id, i)
                     st.rerun()
         st.caption(f"Bạn đang đánh giá {curr_stars} sao." if curr_stars > 0 else "Hãy bấm vào ngôi sao để đánh giá.")
+    
+    st.divider()
+    st.subheader("Phân tích đánh giá từ Mạng Xã Hội")
+    try:
+        reviews_res = requests.get(f"{API_URL}/movie-reviews/{movie['title']}")
+        if reviews_res.status_code == 200:
+            reviews_data = reviews_res.json()
+            total = reviews_data.get("total_reviews", 0)
+            
+            if total > 0:
+                pos = reviews_data.get("pos_ratio", 0)
+                neg = reviews_data.get("neg_ratio", 0)
+                
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Tổng đánh giá (Momo/Moveek)", f"{total:,}")
+                col2.metric("Tỉ lệ Khen (>=8⭐)", f"{pos}%")
+                col3.metric("Tỉ lệ Chê (<=5⭐)", f"{neg}%")
+                
+                if reviews_data.get("wordcloud_base64"):
+                    st.write("**Từ khóa nổi bật:**")
+                    import base64
+                    image_data = base64.b64decode(reviews_data["wordcloud_base64"])
+                    st.image(image_data, use_container_width=True)
+                
+                reviews_list = reviews_data.get("reviews", [])
+                if reviews_list:
+                    with st.expander("Xem bình luận nổi bật"):
+                        for idx, r in enumerate(reviews_list):
+                            st.markdown(f"**Đánh giá:** {r['rating']}/10 ⭐")
+                            st.write(f"💬 _{r['clean_comment']}_")
+                            if idx < len(reviews_list) - 1:
+                                st.divider()
+            else:
+                st.info("Chưa có bình luận nào cho bộ phim này trên MXH.")
+    except Exception as e:
+        st.warning("Không thể kết nối đến hệ thống đánh giá.")
+
     st.divider()
     st.subheader("Có thể bạn cũng thích")
     try:

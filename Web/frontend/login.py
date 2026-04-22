@@ -91,8 +91,8 @@ def main():
                         data = res.json()
                         st.session_state['logged_in'] = True
                         st.session_state['username'] = data['username']
-                        st.session_state['user_id'] = data['user_id'] # Lưu luôn ID do Backend trả về
-                        
+                        st.session_state['user_id'] = data['user_id']
+                        # Giữ lại flag just_registered nếu có (để cold start biết user mới)
                         st.switch_page("pages/app.py") 
                     else:
                         st.error(res.json().get("detail", "Sai tên đăng nhập hoặc mật khẩu!"))
@@ -106,7 +106,9 @@ def main():
                     # GỌI API ĐĂNG KÝ
                     res = requests.post(f"{API_URL}/register", json={"username": username, "password": password})
                     if res.status_code == 200:
-                        st.success("Đăng ký thành công! Bạn có thể bấm Đăng nhập.")
+                        st.success("Đăng ký thành công! Bấm Đăng nhập để tiếp tục.")
+                        # Đánh dấu tài khoản này là MỚI để cold start hiện lên đúng lúc
+                        st.session_state['just_registered'] = True
                     else:
                         st.error(res.json().get("detail", "Tên đăng nhập đã tồn tại. Vui lòng chọn tên khác."))
                 except Exception as e:

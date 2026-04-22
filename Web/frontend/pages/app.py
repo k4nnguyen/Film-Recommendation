@@ -251,55 +251,107 @@ def display_grid(indices, cols=5, key_prefix="grid"):
                     st.button("Chi tiết", key=f"{key_prefix}_btn_{idx}_{i}_{j}", on_click=go_detail, args=(idx,))
 
 # --- 5. LOGIC COLD START ---
-# is_new_user = (current_user_id is None) or (current_user_id not in u_data['user_id'].values)
-is_new_user = u_data.empty
+# Dùng flag 'just_registered' thay vì kiểm tra u_data.empty
+# để tránh hiển thị nhầm cold start cho user cũ chưa load kịp dữ liệu
+is_new_user = st.session_state.get('just_registered', False)
 
 if is_new_user:
-    st.title("Chào mừng bạn đến với hệ thống")
-    st.write("Vui lòng chọn sở thích ban đầu:")
-    selected_genres = st.multiselect("Bước 1: Chọn 3 thể loại yêu thích", all_genres, max_selections=3)
-    
-    if len(selected_genres) == 3:
+    st.title("🎬 Chào mừng đến với hệ thống gợi ý phim!")
+    st.write("Giúp chúng tôi hiểu sở thích của bạn để đề xuất phim phù hợp hơn.")
+    st.progress(0 if len(st.session_state.get('cs_selected_titles', [])) < 3 else 1)
+
+    selected_genres = st.multiselect(
+        "📌 Bước 1: Chọn tối đa 3 thể loại yêu thích",
+        all_genres,
+        max_selections=3
+    )
+
+    # Nếu thay đổi thể loại thì reset danh sách phim đã chọn (tránh "3/3 ma")
+    prev_genres = st.session_state.get('cs_prev_genres', [])
+    if selected_genres != prev_genres:
+        st.session_state['cs_prev_genres'] = selected_genres
+        st.session_state['cs_selected_titles'] = []
+
+    if len(selected_genres) >= 1:
         st.divider()
-        st.markdown("#### Bước 2: Chọn 3 bộ phim bạn thấy ấn tượng nhất:")
-        resp = requests.post(f"{API_URL}/movies/by-genres", json={"genres": selected_genres})
-        filtered_indices = resp.json().get("result_indices", [])
-        num_cols = 5
-        if 'cs_selected_titles' not in st.session_state: st.session_state.cs_selected_titles = []
+        st.markdown("#### 🎥 Bước 2: Chọn đúng 3 bộ phim bạn thấy ấn tượng nhất:")
         
+        try:
+            resp = requests.post(f"{API_URL}/movies/by-genres", json={"genres": selected_genres}, timeout=5)
+            filtered_indices = resp.json().get("result_indices", [])
+        except Exception:
+            st.error("Không thể tải danh sách phim. Vui lòng kiểm tra kết nối Backend.")
+            filtered_indices = []
+
+        num_cols = 5
+        if 'cs_selected_titles' not in st.session_state:
+            st.session_state.cs_selected_titles = []
+
         for i in range(0, len(filtered_indices), num_cols):
             cols = st.columns(num_cols)
             for j in range(num_cols):
                 if i + j < len(filtered_indices):
-                    # Lấy index thực tế từ danh sách API trả về
                     real_idx = filtered_indices[i + j]
                     movie = df.iloc[real_idx]
                     with cols[j]:
-                        st.image(movie['poster_url'] if pd.notna(movie['poster_url']) else "https://via.placeholder.com/300x450", use_container_width=True)
+                        p_url = movie['poster_url'] if pd.notna(movie.get('poster_url', None)) else "https://via.placeholder.com/300x450"
+                        st.image(p_url, use_container_width=True)
                         st.markdown(f'<div class="movie-title">{movie["title"]}</div>', unsafe_allow_html=True)
                         cb_key = f"cb_cs_{movie.name}"
-                        disabled = len(st.session_state.cs_selected_titles) >= 3 and movie['title'] not in st.session_state.cs_selected_titles
-                        is_selected = st.checkbox("Chọn", key=cb_key, value=movie['title'] in st.session_state.cs_selected_titles, disabled=disabled)
-                        if is_selected and movie['title'] not in st.session_state.cs_selected_titles: st.session_state.cs_selected_titles.append(movie['title'])
-                        elif not is_selected and movie['title'] in st.session_state.cs_selected_titles: st.session_state.cs_selected_titles.remove(movie['title'])
+                        disabled = (len(st.session_state.cs_selected_titles) >= 3
+                                    and movie['title'] not in st.session_state.cs_selected_titles)
+                        is_selected = st.checkbox(
+                            "Chọn", key=cb_key,
+                            value=movie['title'] in st.session_state.cs_selected_titles,
+                            disabled=disabled
+                        )
+                        if is_selected and movie['title'] not in st.session_state.cs_selected_titles:
+                            st.session_state.cs_selected_titles.append(movie['title'])
+                        elif not is_selected and movie['title'] in st.session_state.cs_selected_titles:
+                            st.session_state.cs_selected_titles.remove(movie['title'])
 
-        if len(st.session_state.cs_selected_titles) == 3:
-            if st.button("Hoàn tất thiết lập"):
-                # Gom 3 cái ID phim lại thành 1 list
-                selected_ids = [int(df[df['title'] == title].index[0] + 1) for title in st.session_state.cs_selected_titles]
-                
-                # Gọi API nhờ Backend lưu hộ
-                payload = {
-                    "user_id": int(current_user_id),
-                    "selected_movie_ids": selected_ids
-                }
-                requests.post(f"{API_URL}/cold-start", json=payload)
-                if 'u_data' in st.session_state:
-                    del st.session_state['u_data'] # Xóa để vòng sau nó load lại dữ liệu mới có phim
-                # Reset giao diện
-                st.session_state.cs_selected_titles = []
-                st.rerun()
+        num_selected = len(st.session_state.cs_selected_titles)
+        st.info(f"Đã chọn **{num_selected}/3** phim." + (" ✅ Sẵn sàng hoàn tất!" if num_selected == 3 else ""))
+
+        if num_selected == 3:
+            if st.button("✅ Hoàn tất thiết lập", type="primary"):
+                # Tính movie_id (1-indexed)
+                selected_ids = []
+                for title in st.session_state.cs_selected_titles:
+                    matches = df[df['title'] == title]
+                    if not matches.empty:
+                        selected_ids.append(int(matches.index[0]) + 1)
+
+                if not selected_ids:
+                    st.error("Không tìm thấy ID của các phim đã chọn!")
+                else:
+                    try:
+                        payload = {
+                            "user_id": int(current_user_id),
+                            "selected_movie_ids": selected_ids
+                        }
+                        res = requests.post(f"{API_URL}/cold-start", json=payload, timeout=5)
+                        if res.status_code == 200:
+                            # Xóa flag để không hiện lại cold start
+                            st.session_state.pop('just_registered', None)
+                            st.session_state.cs_selected_titles = []
+                            # Xóa cache u_data để load lại
+                            st.session_state.pop('u_data', None)
+                            st.success("Thiết lập xong! Đang chuyển hướng...")
+                            st.rerun()
+                        else:
+                            st.error(f"Lỗi từ server: {res.json().get('detail', 'Vui lòng thử lại')}")
+                    except Exception as e:
+                        st.error("Không thể kết nối đến Backend. Vui lòng kiểm tra lại!")
+
+        st.divider()
+        if st.button("⏭️ Bỏ qua bước này"):
+            st.session_state.pop('just_registered', None)
+            st.session_state.cs_selected_titles = []
+            st.rerun()
+
     st.stop()
+
 
 # --- 6. GIAO DIỆN CHÍNH ---
 if 'page' not in st.session_state:
@@ -356,6 +408,43 @@ elif st.session_state.page == "Chi tiết" and st.session_state.selected_idx is 
                     update_rating(current_user_id, movie_id, i)
                     st.rerun()
         st.caption(f"Bạn đang đánh giá {curr_stars} sao." if curr_stars > 0 else "Hãy bấm vào ngôi sao để đánh giá.")
+    
+    st.divider()
+    st.subheader("Phân tích đánh giá từ Mạng Xã Hội")
+    try:
+        reviews_res = requests.get(f"{API_URL}/movie-reviews/{movie['title']}")
+        if reviews_res.status_code == 200:
+            reviews_data = reviews_res.json()
+            total = reviews_data.get("total_reviews", 0)
+            
+            if total > 0:
+                pos = reviews_data.get("pos_ratio", 0)
+                neg = reviews_data.get("neg_ratio", 0)
+                
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Tổng đánh giá (Momo/Moveek)", f"{total:,}")
+                col2.metric("Tỉ lệ Khen (>=8⭐)", f"{pos}%")
+                col3.metric("Tỉ lệ Chê (<=5⭐)", f"{neg}%")
+                
+                if reviews_data.get("wordcloud_base64"):
+                    st.write("**Từ khóa nổi bật:**")
+                    import base64
+                    image_data = base64.b64decode(reviews_data["wordcloud_base64"])
+                    st.image(image_data, use_container_width=True)
+                
+                reviews_list = reviews_data.get("reviews", [])
+                if reviews_list:
+                    with st.expander("Xem bình luận nổi bật"):
+                        for idx, r in enumerate(reviews_list):
+                            st.markdown(f"**Đánh giá:** {r['rating']}/10 ⭐")
+                            st.write(f"💬 _{r['clean_comment']}_")
+                            if idx < len(reviews_list) - 1:
+                                st.divider()
+            else:
+                st.info("Chưa có bình luận nào cho bộ phim này trên MXH.")
+    except Exception as e:
+        st.warning("Không thể kết nối đến hệ thống đánh giá.")
+
     st.divider()
     st.subheader("Có thể bạn cũng thích")
     try:

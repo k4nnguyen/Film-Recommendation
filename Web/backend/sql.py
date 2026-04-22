@@ -18,3 +18,4 @@ for row in rows:
 
 # Nhớ đóng kết nối cho sạch sẽ
 conn.close()
+

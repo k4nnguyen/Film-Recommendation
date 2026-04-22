@@ -18,7 +18,7 @@ from wordcloud import WordCloud
 
 app = FastAPI()
 executor = ProcessPoolExecutor(max_workers=1)
-df = pd.read_csv('../../crawl_data/data/movies_with_posters.csv')
+df = pd.read_csv('../../crawl_data/data/movies_metadata_encoded.csv')
 features = df.select_dtypes(include=['number'])
 sim_matrix = cosine_similarity(features)
 
@@ -141,7 +141,7 @@ def update_recommender_system():
 
     try:
         # Load dữ liệu phim để hiển thị tên
-        movies_df = pd.read_csv(DATA_DIR + 'movies_with_posters.csv', encoding='utf-8-sig')
+        movies_df = pd.read_csv(DATA_DIR + 'movies_metadata_encoded.csv', encoding='utf-8-sig')
         u_info = pd.read_csv(DATA_DIR + 'u.info', sep='\t', names=['user_id', 'username', 'password'])
         
         # Load u.data 

@@ -7,3 +7,5 @@ bcrypt
 pydantic
 streamlit
 requests
+wordcloud
+matplotlib

@@ -13,6 +13,8 @@ import bcrypt
 import datetime 
 import base64
 from io import BytesIO
+import matplotlib
+matplotlib.use('Agg')  # Dùng backend không cần GUI/Tkinter, an toàn cho multi-thread
 import matplotlib.pyplot as plt
 from wordcloud import WordCloud
 
@@ -118,15 +120,17 @@ def predict_item_knn(train_matrix, similarity_matrix, k=10):
     mean_user_rating = train_matrix.mean(axis=1).values.reshape(-1, 1)
     ratings_diff = (train_matrix - mean_user_rating).fillna(0).values
     
-    sim_matrix = similarity_matrix.values
+    sim_matrix_vals = similarity_matrix.values
+    # Sửa lỗi: dùng notna() để xác định user đã xem, không dùng != 0
+    has_rated_mask_all = train_matrix.notna().values
     
     for j in range(train_matrix.shape[1]):
-        sim_col = sim_matrix[:, j].copy()
+        sim_col = sim_matrix_vals[:, j].copy()
         sim_col[j] = -2 
         top_k_indices = np.argsort(sim_col)[:-k-1:-1]
         weights = sim_col[top_k_indices]
         
-        has_rated_mask = (ratings_diff[:, top_k_indices] != 0)
+        has_rated_mask = has_rated_mask_all[:, top_k_indices]
         sum_weights = np.sum(has_rated_mask * np.abs(weights), axis=1)
         sum_weights[sum_weights == 0] = 1e-9
         
@@ -350,10 +354,30 @@ def get_cf_recommendations(idx: int):
 def cold_start(data: ColdStartData):
     data_path = '../../crawl_data/data/u.data'
     try:
-        # Tạo danh sách các dòng mới (user_id, movie_id, 5 sao)
-        new_entries = [[data.user_id, mid, 5] for mid in data.selected_movie_ids]
-        pd.DataFrame(new_entries).to_csv(data_path, mode='a', sep='\t', index=False, header=False, encoding='utf-8-sig')
-        return {"status": "success", "message": "Đã lưu thiết lập ban đầu"}
+        # Đọc file hiện tại để kiểm tra trùng lặp
+        if os.path.exists(data_path):
+            existing = pd.read_csv(data_path, sep='\t', names=['user_id', 'movie_id', 'rating'], encoding='utf-8-sig')
+        else:
+            existing = pd.DataFrame(columns=['user_id', 'movie_id', 'rating'])
+        
+        # Lọc bỏ những phim mà user này đã có trong u.data (tránh duplicate)
+        already_rated = existing[existing['user_id'] == data.user_id]['movie_id'].tolist()
+        new_movie_ids = [mid for mid in data.selected_movie_ids if mid not in already_rated]
+        
+        if not new_movie_ids:
+            return {"status": "success", "message": "Tất cả phim đã được đánh giá trước đó"}
+        
+        # Ghi các phim mới vào file (4 sao = yêu thích ban đầu, hợp lý hơn 5 sao tùy tiện)
+        new_rows = [[data.user_id, mid, 4] for mid in new_movie_ids]
+        with open(data_path, 'a', encoding='utf-8-sig') as f:
+            for row in new_rows:
+                f.write(f"{row[0]}\t{row[1]}\t{row[2]}\n")
+        
+        return {
+            "status": "success", 
+            "message": f"Đã lưu {len(new_rows)} phim yêu thích ban đầu",
+            "saved_count": len(new_rows)
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

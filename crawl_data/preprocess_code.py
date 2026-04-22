@@ -6,7 +6,6 @@ import emoji
 from pyvi import ViTokenizer
 
 # Cài đặt hiển thị đồ thị
-%matplotlib inline
 sns.set_theme(style="whitegrid")
 
 # Tải dữ liệu

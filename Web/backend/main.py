@@ -116,7 +116,6 @@ def predict_item_knn(train_matrix, similarity_matrix, k=10):
         damping_factor = 3.0 
         numerator = ratings_diff[:, top_k_indices].dot(weights)
         pred[:, j] = mean_user_rating.flatten() + (numerator / (sum_weights + damping_factor))
-            
     return pred
 
 def update_recommender_system():

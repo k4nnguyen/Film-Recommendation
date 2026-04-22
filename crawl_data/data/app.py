@@ -93,7 +93,7 @@ if __name__ == "__main__":
     rating_sim_matrix = shrink_similarity(raw_rating_sim, train_matrix, shrinkage=5)
     
     # 3.3. Tải dữ liệu Text (Bình luận phim)
-    movies_df = pd.read_csv('movies_with_posters.csv')
+    movies_df = pd.read_csv('movies_metadata_encoded.csv')
     try:
         reviews_df = pd.read_csv('movie_reviews_cleaned.csv')
         reviews_df = reviews_df.dropna(subset=['clean_comment'])

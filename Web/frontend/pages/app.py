@@ -137,9 +137,8 @@ def scroll_to_top():
 # --- 2. LOAD DỮ LIỆU TỪ BACKEND ---
 API_URL = "http://127.0.0.1:8000"
 
-@st.cache_data
 def load_base_data():
-    # 1. Gọi Backend lấy danh sách phim
+    # 1. Gọi Backend lấy danh sách phim (không cache để luôn lấy dữ liệu mới nhất)
     resp_movies = requests.get(f"{API_URL}/movies")
     df = pd.DataFrame(resp_movies.json())
     
@@ -159,7 +158,7 @@ current_user_id = st.session_state.get('user_id')
 
 # 3. Gọi Backend lấy lịch sử đánh giá của ĐÚNG user này
 if current_user_id:
-    if 'u_data' not in st.session_state or st.sidebar.button("🔄 Làm mới dữ liệu"):
+    if 'u_data' not in st.session_state:
         resp_ratings = requests.get(f"{API_URL}/user-ratings/{current_user_id}")
         data_json = resp_ratings.json()
         if data_json:
@@ -386,7 +385,9 @@ elif st.session_state.page == "Chi tiết" and st.session_state.selected_idx is 
     st.button("Quay lại", on_click=go_home)
 
     c1, c2 = st.columns([1, 2])
-    with c1: st.image(movie['poster_url'], use_container_width=True)
+    with c1:
+        detail_poster = movie.get('poster_url') if pd.notna(movie.get('poster_url', None)) else "https://placehold.co/300x450?text=No+Image"
+        st.image(detail_poster, use_container_width=True)
     with c2:
         st.title(movie['title'])
         st.write(f"**Thể loại:** {movie['genre']}")
@@ -426,12 +427,7 @@ elif st.session_state.page == "Chi tiết" and st.session_state.selected_idx is 
                 col2.metric("Tỉ lệ Khen (>=8⭐)", f"{pos}%")
                 col3.metric("Tỉ lệ Chê (<=5⭐)", f"{neg}%")
                 
-                if reviews_data.get("wordcloud_base64"):
-                    st.write("**Từ khóa nổi bật:**")
-                    import base64
-                    image_data = base64.b64decode(reviews_data["wordcloud_base64"])
-                    st.image(image_data, use_container_width=True)
-                
+
                 reviews_list = reviews_data.get("reviews", [])
                 if reviews_list:
                     with st.expander("Xem bình luận nổi bật"):

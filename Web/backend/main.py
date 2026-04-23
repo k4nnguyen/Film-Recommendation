@@ -320,8 +320,28 @@ def get_user_ratings(user_id: int):
 @app.get("/movies/trending")
 def get_trending_movies():
     try:
-        # Lấy vị trí của 15 phim đầu tiên 
-        trending_indices = list(range(min(15, len(df))))
+        u_data = pd.read_csv(DATA_DIR + 'u.data', sep='\t', names=['user_id', 'movie_id', 'rating'])
+
+        # Tính trung bình rating và số lượt vote cho từng phim
+        stats = u_data.groupby('movie_id')['rating'].agg(['mean', 'count']).reset_index()
+        stats.columns = ['movie_id', 'avg_rating', 'vote_count']
+
+        # Bayesian average: chỉ lấy phim có ít nhất MIN_VOTES lượt đánh giá
+        # để tránh phim 1 vote 5 sao đứng đầu
+        MIN_VOTES = 3
+        global_mean = float(u_data['rating'].mean())
+        stats['score'] = (
+            (stats['vote_count'] / (stats['vote_count'] + MIN_VOTES)) * stats['avg_rating'] +
+            (MIN_VOTES / (stats['vote_count'] + MIN_VOTES)) * global_mean
+        )
+
+        # Sắp xếp theo score giảm dần, lấy top 15
+        top_movies = stats.sort_values('score', ascending=False).head(15)
+
+        # Chuyển movie_id (1-indexed) sang DataFrame index (0-indexed)
+        trending_indices = [int(mid) - 1 for mid in top_movies['movie_id'].tolist()
+                           if 0 <= int(mid) - 1 < len(df)]
+
         return {"trending_indices": trending_indices}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

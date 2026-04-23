@@ -74,9 +74,10 @@ if __name__ == "__main__":
     test_df = load_csv_data('ua_test.csv')
     train_matrix = train_df.pivot(index='user_id', columns='item_id', values='rating')
     
-    # Đảm bảo ma trận vuông (bao gồm tất cả phim từ 1 đến 83)
-    all_items = sorted(list(set(train_df['item_id']).union(set(test_df['item_id']))))
-    for item in range(1, 84):
+    # Đảm bảo ma trận vuông (bao gồm tất cả phim dựa theo movies_metadata_encoded.csv)
+    movies_df = pd.read_csv('movies_metadata_encoded.csv', encoding='utf-8-sig')
+    num_movies = len(movies_df)
+    for item in range(1, num_movies + 1):
         if item not in train_matrix.columns:
             train_matrix[item] = np.nan
     train_matrix = train_matrix.reindex(sorted(train_matrix.columns), axis=1)
@@ -93,7 +94,7 @@ if __name__ == "__main__":
     rating_sim_matrix = shrink_similarity(raw_rating_sim, train_matrix, shrinkage=5)
     
     # 3.3. Tải dữ liệu Text (Bình luận phim)
-    movies_df = pd.read_csv('movies_metadata_encoded.csv')
+    # movies_df và num_movies đã được đọc ở bước trên
     try:
         reviews_df = pd.read_csv('movie_reviews_cleaned.csv')
         reviews_df = reviews_df.dropna(subset=['clean_comment'])
@@ -109,8 +110,7 @@ if __name__ == "__main__":
     # 3.4. Chuyển Text thành TF-IDF và Tính Text Similarity
     # Tạo danh sách văn bản theo đúng thứ tự item_id (từ 1 đến 83)
     corpus = []
-    for item_id in range(1, 84):
-        # item_id 1 tương ứng index 0 trong movies_with_posters
+    for item_id in range(1, num_movies + 1):
         title = movies_df.iloc[item_id - 1]['title'] if (item_id - 1) < len(movies_df) else ""
         text = movie_texts.get(title, "")
         corpus.append(text)
@@ -118,7 +118,7 @@ if __name__ == "__main__":
     vectorizer = TfidfVectorizer(max_features=5000, ngram_range=(1, 2))
     tfidf_matrix = vectorizer.fit_transform(corpus)
     text_sim_matrix = cosine_similarity(tfidf_matrix)
-    text_sim_df = pd.DataFrame(text_sim_matrix, index=range(1, 84), columns=range(1, 84))
+    text_sim_df = pd.DataFrame(text_sim_matrix, index=range(1, num_movies + 1), columns=range(1, num_movies + 1))
     
     print("3. Đã tính xong ma trận tương đồng nội dung (Content-Based)")
     

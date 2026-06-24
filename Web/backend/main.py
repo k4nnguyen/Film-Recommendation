@@ -261,7 +261,7 @@ class GenreList(BaseModel):
     
 @app.get("/all-users")
 def get_all_users(): # Lấy ra tất cả người dùng
-    u_info = pd.read_csv('crawl_data/data/u.info', sep='\t', names=['user_id', 'username', 'password'])
+    u_info = pd.read_csv('../../crawl_data/data/u.info', sep='\t', names=['user_id', 'username', 'password'])
     safe_data = u_info[['user_id', 'username']] 
     return safe_data.to_dict(orient='records')
 

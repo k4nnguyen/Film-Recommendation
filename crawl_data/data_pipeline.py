@@ -239,8 +239,10 @@ def crawl_movies():
             df_combined = pd.concat([df_existing, df_new], ignore_index=True).fillna(0)
             df_combined.to_csv(ENCODED_METADATA_FILE, index=False, encoding='utf-8-sig')
         else:
+            # Ghi header chỉ khi df_existing rỗng (tức là file chưa có dữ liệu)
+            write_header = df_existing.empty
             df_new = pd.DataFrame([new_row], columns=existing_cols)
-            df_new.to_csv(ENCODED_METADATA_FILE, mode='a', index=False, header=not os.path.exists(ENCODED_METADATA_FILE), encoding='utf-8-sig')
+            df_new.to_csv(ENCODED_METADATA_FILE, mode='a', index=False, header=write_header, encoding='utf-8-sig')
 
         print(f"Đã lưu thông tin phim: {movie_info['title']}")
 
@@ -323,7 +325,9 @@ def crawl_reviews():
             })
 
         df_reviews = pd.DataFrame(reviews_data)
-        df_reviews.to_csv(REVIEWS_FILE, mode='a', index=False, header=not os.path.exists(REVIEWS_FILE), encoding='utf-8-sig')
+        # Ghi header chỉ khi file chưa tồn tại (lần đầu ghi)
+        reviews_file_exists = os.path.exists(REVIEWS_FILE)
+        df_reviews.to_csv(REVIEWS_FILE, mode='a', index=False, header=not reviews_file_exists, encoding='utf-8-sig')
         
         valid_reviews_count = len(reviews_data) if reviews_data[0]['rating'] != "" else 0
         print(f"Đã lưu xong {title} - {valid_reviews_count} reviews")
@@ -336,7 +340,6 @@ def crawl_reviews():
 def plot_eda(df, prefix="before"):
     if df.empty: return
     
-    df_plot = df.copy()
     df_plot = df.copy()
     
     # Lọc bỏ các đánh giá rỗng (không có bình luận thực sự) khỏi tất cả các biểu đồ
